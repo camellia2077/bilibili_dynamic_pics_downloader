@@ -4,7 +4,7 @@ import json
 import random
 import time
 from datetime import datetime
-#class
+#当动态的评论区没有图片的时候，不创建文件夹
 class Config:
     """全局配置类"""
     USER_MID = "560647"  # 默认用户UID
@@ -211,6 +211,17 @@ class MainController:
         # 获取图片
         images = self._get_all_images(oid, dynamic_type)
         print(f"发现 {len(images)} 张图片")
+
+        # 如果没有图片则跳过
+        if not images:
+            print("没有发现图片，跳过创建文件夹")
+            return
+        try:
+            # 仅在发现图片时创建文件夹
+            save_folder = self.downloader.create_folder(pub_date)
+        except Exception as e:
+            print(f"创建文件夹失败: {str(e)}")
+            return
         
         # 下载图片
         save_folder = self.downloader.create_folder(pub_date)
