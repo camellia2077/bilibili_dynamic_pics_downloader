@@ -3,9 +3,8 @@ import requests
 import json
 from datetime import datetime
 import time
-
-#这个程序会遍历所有的程序再开始保存
-
+#不设定目录默认保存在程序同文件夹的output文件夹里
+# 采用分页获取动态并即时处理的模式
 # 全局配置
 COOKIE = "_uuid="
 HEADERS = {
@@ -13,81 +12,74 @@ HEADERS = {
     "Referer": "https://www.bilibili.com/",
     "Cookie": COOKIE
 }
-SAVE_PATH = "C:\Base1\srt"
+SAVE_PATH = "./output"
 
-# 动态类型映射表
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_DRAW": 11,
     "DYNAMIC_TYPE_WORD": 17,
     "DYNAMIC_TYPE_FORWARD": 17
 }
 
-def get_all_dynamics(mid):
-    """获取用户全部动态（分页版）"""
-    all_dynamics = []
-    offset = ""
-    has_more = True
-    retry_count = 3
+def process_single_page(mid, offset):
+    """处理单页动态并返回下一页offset"""
+    url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
+    params = {"host_mid": mid, "offset": offset}
     
-    while has_more:
-        url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
-        params = {
-            "host_mid": mid,
-            "offset": offset,
-            "offset_dynamic_id": 0
-        }
+    try:
+        response = requests.get(url, headers=HEADERS, params=params, timeout=15)
+        response.raise_for_status()
+        data = json.loads(response.text)
         
-        for _ in range(retry_count):
-            try:
-                response = requests.get(url, headers=HEADERS, params=params, timeout=10)
-                response.raise_for_status()
-                data = json.loads(response.text)
-                
-                if data["code"] != 0:
-                    print(f"API返回错误: {data['message']}")
-                    return []
-                
-                # 处理动态数据
-                for item in data["data"]["items"]:
-                    dynamic_type = DYNAMIC_TYPE_MAP.get(item["type"], 17)
-                    
-                    # 提取真实oid
-                    if dynamic_type == 11:
-                        oid = item["modules"]["module_dynamic"]["major"]["draw"]["id"]
-                    else:
-                        oid = item["id_str"]
-                    
-                    timestamp = item["modules"]["module_author"]["pub_ts"]
-                    pub_date = datetime.fromtimestamp(timestamp)
-                    
-                    all_dynamics.append({
-                        "oid": oid,
-                        "pub_date": pub_date,
-                        "type": dynamic_type
-                    })
-                
-                # 更新分页参数
-                has_more = data["data"]["has_more"]
-                offset = data["data"]["offset"]
-                time.sleep(1)  # 添加请求间隔
-                break
-                
-            except Exception as e:
-                print(f"请求失败: {str(e)}，剩余重试次数：{retry_count-1}")
-                time.sleep(3)
-                if _ == retry_count-1:
-                    has_more = False
-                continue
-                
-    return all_dynamics
+        if data["code"] != 0:
+            print(f"动态列表接口错误: {data['message']}")
+            return None, None
+        
+        # 处理本页动态
+        for item in data["data"]["items"]:
+            process_single_dynamic(item)
+        
+        # 返回下一页参数
+        return data["data"]["has_more"], data["data"]["offset"]
+    
+    except Exception as e:
+        print(f"动态页请求失败: {str(e)}")
+        return None, None
+
+def process_single_dynamic(item):
+    """处理单个动态"""
+    try:
+        # 解析动态信息
+        dynamic_type = DYNAMIC_TYPE_MAP.get(item["type"], 17)
+        oid = item["modules"]["module_dynamic"]["major"]["draw"]["id"] if dynamic_type == 11 else item["id_str"]
+        pub_date = datetime.fromtimestamp(item["modules"]["module_author"]["pub_ts"])
+        
+        # 创建日期目录
+        folder_name = pub_date.strftime("%Y-%m-%d")
+        save_folder = os.path.join(SAVE_PATH, folder_name)
+        os.makedirs(save_folder, exist_ok=True)
+        
+        print(f"\n开始处理动态 {oid} ({pub_date})")
+        
+        # 获取并下载图片
+        images = get_all_replies(oid, dynamic_type)
+        print(f"发现 {len(images)} 张图片")
+        
+        for idx, img_url in enumerate(images, 1):
+            download_image(img_url, save_folder)
+            if idx % 5 == 0:  # 每下载5张暂停一下
+                time.sleep(1)
+    
+    except Exception as e:
+        print(f"处理动态失败: {str(e)}")
 
 def get_all_replies(oid, dynamic_type):
-    """获取全部评论（包含子评论）"""
-    all_images = []
+    """获取全部评论图片（优化版）"""
+    images = []
     next_page = 0
     retry_count = 3
     
     while True:
+        # 使用新版评论接口
         url = "https://api.bilibili.com/x/v2/reply/main"
         params = {
             "type": dynamic_type,
@@ -96,6 +88,7 @@ def get_all_replies(oid, dynamic_type):
             "next": next_page
         }
         
+        success = False
         for _ in range(retry_count):
             try:
                 response = requests.get(url, headers=HEADERS, params=params, timeout=10)
@@ -104,86 +97,84 @@ def get_all_replies(oid, dynamic_type):
                 
                 if data["code"] != 0:
                     print(f"评论接口错误: {data['message']}")
-                    return []
+                    return images
                 
-                # 处理当前页评论
+                # 提取图片
                 for reply in data["data"]["replies"]:
-                    if reply.get("content", {}).get("pictures"):
-                        all_images.extend(pic["img_src"] for pic in reply["content"]["pictures"])
-                    
+                    images += extract_images_from_reply(reply)
                     # 处理子评论
-                    if reply.get("replies"):
-                        for sub_reply in reply["replies"]:
-                            if sub_reply.get("content", {}).get("pictures"):
-                                all_images.extend(pic["img_src"] for pic in sub_reply["content"]["pictures"])
+                    for sub_reply in reply.get("replies", []):
+                        images += extract_images_from_reply(sub_reply)
                 
-                # 更新分页参数
+                # 检查是否结束
                 if data["data"]["cursor"]["is_end"]:
-                    return all_images
+                    return images
                 
                 next_page = data["data"]["cursor"]["next"]
-                time.sleep(0.5)  # 评论请求间隔
+                success = True
+                time.sleep(0.8)  # 评论翻页间隔
                 break
                 
             except Exception as e:
                 print(f"评论请求失败: {str(e)}，剩余重试次数：{retry_count-1}")
                 time.sleep(2)
-                if _ == retry_count-1:
-                    return all_images
-                continue
+        
+        if not success:
+            print("评论请求最终失败，跳过本动态")
+            return images
+
+def extract_images_from_reply(reply):
+    """从回复中提取图片"""
+    if "content" in reply and "pictures" in reply["content"]:
+        return [pic["img_src"] for pic in reply["content"]["pictures"]]
+    return []
 
 def download_image(url, folder):
-    """改进的下载函数"""
+    """增强版下载函数"""
     filename = url.split("/")[-1].split("?")[0]
     filepath = os.path.join(folder, filename)
     
     if os.path.exists(filepath):
-        print(f"文件已存在: {filename}")
         return
     
     for attempt in range(3):
         try:
-            response = requests.get(url, headers=HEADERS, stream=True, timeout=15)
+            response = requests.get(url, headers=HEADERS, stream=True, timeout=20)
             response.raise_for_status()
             
             with open(filepath, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
-            print(f"下载成功: {filename}")
+            print(f"√ 下载成功: {filename}")
             return
         except Exception as e:
-            print(f"下载失败({attempt+1}/3): {filename} - {str(e)}")
-            time.sleep(2)
+            print(f"× 下载失败({attempt+1}/3): {filename}")
+            time.sleep(1)
     
-    print(f"无法下载: {filename}")
+    print(f"! 永久下载失败: {filename}")
 
 def main(mid):
     os.makedirs(SAVE_PATH, exist_ok=True)
+    has_more = True
+    offset = ""
     
-    print("开始获取动态列表...")
-    dynamics = get_all_dynamics(mid)
-    print(f"共找到 {len(dynamics)} 条动态")
-    
-    for index, dynamic in enumerate(dynamics, 1):
-        try:
-            # 生成带连字符的日期格式
-            folder_name = dynamic["pub_date"].strftime("%Y-%m-%d")
-            save_folder = os.path.join(SAVE_PATH, folder_name)
-            os.makedirs(save_folder, exist_ok=True)
-            
-            print(f"\n处理动态 {index}/{len(dynamics)}")
-            print(f"动态ID: {dynamic['oid']} | 类型: {dynamic['type']} | 发布时间: {folder_name}")
-            
-            images = get_all_replies(dynamic["oid"], dynamic["type"])
-            print(f"发现 {len(images)} 张图片")
-            
-            for img_url in images:
-                download_image(img_url, save_folder)
-                
-        except Exception as e:
-            print(f"处理动态 {dynamic['oid']} 时出错: {str(e)}")
+    page_num = 1
+    while has_more:
+        print(f"\n正在获取第 {page_num} 页动态...")
+        has_more, new_offset = process_single_page(mid, offset)
+        
+        if has_more is None:  # 出错重试
+            print("等待5秒后重试本页...")
+            time.sleep(5)
             continue
+        
+        if has_more:
+            offset = new_offset
+            page_num += 1
+            time.sleep(2)  # 动态翻页间隔
+        else:
+            print("\n所有动态已处理完毕")
 
 if __name__ == "__main__":
     USER_MID = "560647"
