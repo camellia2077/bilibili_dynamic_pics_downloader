@@ -1,5 +1,5 @@
 # bilibili_dynamic_pics_download
-bilibili动态图片以及动态图片的评论区的图片下载
+bilibili用户动态中的图片，以及动态评论区的图片下载
 # 使用说明
 1修改全局变量COOKIE的值为你登录之后的获取的全局变量
 
