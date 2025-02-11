@@ -4,180 +4,253 @@ import json
 import random
 import time
 from datetime import datetime
-#USER_MID 全局变量
-# 全局配置
-USER_MID = "560647"  # 默认用户UID
-COOKIE = ""
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Referer": "https://www.bilibili.com/",
-    "Cookie": COOKIE
-}
-SAVE_PATH = "C:\Base1\srt"
-DELAY_FIRST = 0.5
-DELAY_LAST = 0.6
+#class
+class Config:
+    """全局配置类"""
+    USER_MID = "560647"  # 默认用户UID
+    COOKIE = ""
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Referer": "https://www.bilibili.com/",
+        "Cookie": COOKIE
+    }
+    SAVE_PATH = "C:\\Base1\\bbb\\bili_comment"
+    DELAY_RANGE = (0.5, 0.6)  # 随机延迟范围
+    DYNAMIC_TYPE_MAP = {
+        "DYNAMIC_TYPE_DRAW": 11,
+        "DYNAMIC_TYPE_WORD": 17,
+        "DYNAMIC_TYPE_FORWARD": 17
+    }
 
-DYNAMIC_TYPE_MAP = {
-    "DYNAMIC_TYPE_DRAW": 11,
-    "DYNAMIC_TYPE_WORD": 17,
-    "DYNAMIC_TYPE_FORWARD": 17
-}
-
-def random_delay():
-    """生成随机延迟"""
-    time.sleep(random.uniform(DELAY_FIRST, DELAY_LAST))
-
-def process_single_page(offset):
-    """处理单页动态"""
-    url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
-    params = {"host_mid": USER_MID, "offset": offset}
+class APIClient:
+    """API请求客户端"""
+    def __init__(self):
+        self.headers = Config.HEADERS
+        self.delay_range = Config.DELAY_RANGE
     
-    try:
-        random_delay()
-        response = requests.get(url, headers=HEADERS, params=params, timeout=15)
-        response.raise_for_status()
-        data = json.loads(response.text)
-        
-        if data["code"] != 0:
-            print(f"动态列表接口错误: {data['message']}")
-            return None, None
-        
-        # 处理本页动态
-        for item in data["data"]["items"]:
-            process_single_dynamic(item)
-        
-        return data["data"]["has_more"], data["data"]["offset"]
+    def _random_delay(self):
+        """生成随机延迟"""
+        time.sleep(random.uniform(*self.delay_range))
     
-    except Exception as e:
-        print(f"动态页请求失败: {str(e)}")
-        return None, None
-
-def process_single_dynamic(item):
-    """处理单个动态"""
-    try:
-        dynamic_type = DYNAMIC_TYPE_MAP.get(item["type"], 17)
-        oid = item["modules"]["module_dynamic"]["major"]["draw"]["id"] if dynamic_type == 11 else item["id_str"]
-        pub_date = datetime.fromtimestamp(item["modules"]["module_author"]["pub_ts"])
-        
-        folder_name = pub_date.strftime("%Y-%m-%d")
-        save_folder = os.path.join(SAVE_PATH, folder_name)
-        os.makedirs(save_folder, exist_ok=True)
-        
-        print(f"\n处理动态 {oid} ({pub_date})")
-        
-        images = get_all_replies(oid, dynamic_type)
-        print(f"发现 {len(images)} 张图片")
-        
-        for idx, img_url in enumerate(images, 1):
-            download_image(img_url, save_folder)
-            if idx % 5 == 0:
-                random_delay()
-    
-    except Exception as e:
-        print(f"处理动态失败: {str(e)}")
-
-def get_all_replies(oid, dynamic_type):
-    """获取全部评论图片"""
-    images = []
-    next_page = 0
-    retry_count = 3
-    
-    while True:
-        url = "https://api.bilibili.com/x/v2/reply/main"
-        params = {
-            "type": dynamic_type,
-            "oid": oid,
-            "mode": 3,
-            "next": next_page
-        }
-        
-        success = False
-        for _ in range(retry_count):
-            try:
-                random_delay()
-                response = requests.get(url, headers=HEADERS, params=params, timeout=10)
-                response.raise_for_status()
-                data = json.loads(response.text)
-                
-                if data["code"] != 0:
-                    print(f"评论接口错误: {data['message']}")
-                    return images
-                
-                for reply in data["data"]["replies"]:
-                    images += extract_images_from_reply(reply)
-                    for sub_reply in reply.get("replies", []):
-                        images += extract_images_from_reply(sub_reply)
-                
-                if data["data"]["cursor"]["is_end"]:
-                    return images
-                
-                next_page = data["data"]["cursor"]["next"]
-                success = True
-                break
-                
-            except Exception as e:
-                print(f"评论请求失败: {str(e)}")
-                time.sleep(2)
-        
-        if not success:
-            print("评论请求最终失败，跳过本动态")
-            return images
-
-def extract_images_from_reply(reply):
-    """提取评论图片"""
-    if "content" in reply and "pictures" in reply["content"]:
-        return [pic["img_src"] for pic in reply["content"]["pictures"]]
-    return []
-
-def download_image(url, folder):
-    """下载图片"""
-    filename = url.split("/")[-1].split("?")[0]
-    filepath = os.path.join(folder, filename)
-    
-    if os.path.exists(filepath):
-        return
-    
-    for attempt in range(3):
+    def fetch_dynamic_page(self, offset):
+        """
+        获取单页动态数据
+        :param offset: 分页偏移量
+        :return: (has_more, next_offset, items)
+        """
+        self._random_delay()
         try:
-            random_delay()
-            response = requests.get(url, headers=HEADERS, stream=True, timeout=20)
+            response = requests.get(
+                url="https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
+                headers=self.headers,
+                params={"host_mid": Config.USER_MID, "offset": offset},
+                timeout=15
+            )
             response.raise_for_status()
+            data = json.loads(response.text)
             
-            with open(filepath, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            print(f"√ 下载成功: {filename}")
-            return
+            if data["code"] != 0:
+                print(f"动态接口错误: {data['message']}")
+                return False, None, []
+            
+            return (
+                data["data"]["has_more"],
+                data["data"]["offset"],
+                data["data"]["items"]
+            )
         except Exception as e:
-            print(f"× 下载失败({attempt+1}/3): {filename}")
-            time.sleep(1)
+            print(f"动态页请求失败: {str(e)}")
+            return False, None, []
     
-    print(f"! 永久下载失败: {filename}")
+    def fetch_comments(self, oid, dynamic_type, next_page=0):
+        """
+        获取评论数据
+        :param oid: 动态ID
+        :param dynamic_type: 动态类型
+        :param next_page: 分页页码
+        :return: (is_end, next_page, replies)
+        """
+        self._random_delay()
+        try:
+            response = requests.get(
+                url="https://api.bilibili.com/x/v2/reply/main",
+                headers=self.headers,
+                params={
+                    "type": dynamic_type,
+                    "oid": oid,
+                    "mode": 3,
+                    "next": next_page
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            data = json.loads(response.text)
+            
+            if data["code"] != 0:
+                print(f"评论接口错误: {data['message']}")
+                return True, 0, []
+            
+            return (
+                data["data"]["cursor"]["is_end"],
+                data["data"]["cursor"]["next"],
+                data["data"]["replies"]
+            )
+        except Exception as e:
+            print(f"评论请求失败: {str(e)}")
+            return True, 0, []
 
-def main():
-    """主程序"""
-    os.makedirs(SAVE_PATH, exist_ok=True)
-    has_more = True
-    offset = ""
-    page_num = 1
+class DynamicProcessor:
+    """动态处理器"""
+    def __init__(self, api_client):
+        self.api_client = api_client
     
-    print(f"开始爬取用户 {USER_MID} 的动态...")
+    def parse_dynamic_item(self, item):
+        """
+        解析单个动态项
+        :return: (oid, pub_date, dynamic_type)
+        """
+        try:
+            dynamic_type = Config.DYNAMIC_TYPE_MAP.get(item["type"], 17)
+            if dynamic_type == 11:
+                oid = item["modules"]["module_dynamic"]["major"]["draw"]["id"]
+            else:
+                oid = item["id_str"]
+            
+            pub_date = datetime.fromtimestamp(
+                item["modules"]["module_author"]["pub_ts"]
+            )
+            return oid, pub_date, dynamic_type
+        except KeyError as e:
+            print(f"动态解析失败: {str(e)}")
+            return None, None, None
+
+class ImageDownloader:
+    """图片下载器"""
+    def __init__(self):
+        self.base_path = Config.SAVE_PATH
     
-    while has_more:
-        print(f"\n正在获取第 {page_num} 页动态...")
-        has_more, new_offset = process_single_page(offset)
+    def create_folder(self, pub_date):
+        """
+        创建保存目录
+        :return: 完整保存路径
+        """
+        folder_name = pub_date.strftime("%Y-%m-%d")
+        full_path = os.path.join(self.base_path, folder_name)
+        os.makedirs(full_path, exist_ok=True)
+        return full_path
+    
+    def download(self, url, save_path, retry=3):
+        """
+        下载单张图片
+        :return: 是否下载成功
+        """
+        filename = url.split("/")[-1].split("?")[0]
+        filepath = os.path.join(save_path, filename)
         
-        if has_more is None:
-            print("等待5秒后重试本页...")
-            time.sleep(5)
-            continue
+        if os.path.exists(filepath):
+            return False
         
-        if has_more:
+        for attempt in range(retry):
+            try:
+                response = requests.get(url, headers=Config.HEADERS, stream=True, timeout=20)
+                response.raise_for_status()
+                
+                with open(filepath, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"下载成功: {filename}")
+                return True
+            except Exception as e:
+                print(f"下载失败({attempt+1}/{retry}): {filename}")
+                time.sleep(1)
+        
+        print(f"永久下载失败: {filename}")
+        return False
+
+class MainController:
+    """主控制器"""
+    def __init__(self):
+        self.api_client = APIClient()
+        self.dynamic_processor = DynamicProcessor(self.api_client)
+        self.downloader = ImageDownloader()
+    
+    def process_all_dynamics(self):
+        """处理所有动态"""
+        offset = ""
+        page_num = 1
+        
+        while True:
+            print(f"\n正在获取第 {page_num} 页动态...")
+            has_more, new_offset, items = self.api_client.fetch_dynamic_page(offset)
+            
+            if not items:
+                print("等待5秒后重试...")
+                time.sleep(5)
+                continue
+            
+            # 处理本页动态
+            for item in items:
+                self.process_single_dynamic(item)
+            
+            if not has_more:
+                print("\n所有动态已处理完毕")
+                break
+            
             offset = new_offset
             page_num += 1
             time.sleep(random.uniform(1.0, 1.5))
-        else:
-            print("\n所有动态已处理完毕")
+    
+    def process_single_dynamic(self, item):
+        """处理单个动态"""
+        oid, pub_date, dynamic_type = self.dynamic_processor.parse_dynamic_item(item)
+        if not all([oid, pub_date, dynamic_type]):
+            return
+        
+        print(f"\n处理动态 {oid} ({pub_date})")
+        
+        # 获取图片
+        images = self._get_all_images(oid, dynamic_type)
+        print(f"发现 {len(images)} 张图片")
+        
+        # 下载图片
+        save_folder = self.downloader.create_folder(pub_date)
+        for idx, img_url in enumerate(images, 1):
+            self.downloader.download(img_url, save_folder)
+            if idx % 5 == 0:
+                time.sleep(random.uniform(*Config.DELAY_RANGE))
+    
+    def _get_all_images(self, oid, dynamic_type):
+        """获取动态所有图片"""
+        images = []
+        next_page = 0
+        
+        while True:
+            is_end, new_page, replies = self.api_client.fetch_comments(oid, dynamic_type, next_page)
+            
+            # 提取图片
+            for reply in replies:
+                images += self._extract_images(reply)
+                for sub_reply in reply.get("replies", []):
+                    images += self._extract_images(sub_reply)
+            
+            if is_end:
+                break
+            
+            next_page = new_page
+        
+        return images
+    
+    def _extract_images(self, reply):
+        """从回复中提取图片"""
+        if "content" in reply and "pictures" in reply["content"]:
+            return [pic["img_src"] for pic in reply["content"]["pictures"]]
+        return []
+
+def main():
+    """程序入口"""
+    controller = MainController()
+    print(f"开始爬取用户 {Config.USER_MID} 的动态...")
+    controller.process_all_dynamics()
 
 if __name__ == "__main__":
     main()
