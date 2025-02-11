@@ -1,18 +1,20 @@
 import os
 import requests
 import json
-from datetime import datetime
+import random
 import time
-#不设定目录默认保存在程序同文件夹的output文件夹里
-# 采用分页获取动态并即时处理的模式
+from datetime import datetime
+#全局变量延迟
 # 全局配置
-COOKIE = "_uuid="
+COOKIE = ""
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "Referer": "https://www.bilibili.com/",
     "Cookie": COOKIE
 }
-SAVE_PATH = "./output"
+SAVE_PATH = "C:\Base1\srt"
+DELAY_FIRST = 0.5  # 最小延迟时间（秒）
+DELAY_LAST = 0.6   # 最大延迟时间（秒）
 
 DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_DRAW": 11,
@@ -20,12 +22,18 @@ DYNAMIC_TYPE_MAP = {
     "DYNAMIC_TYPE_FORWARD": 17
 }
 
+def random_delay():
+    """生成随机延迟"""
+    time.sleep(random.uniform(DELAY_FIRST, DELAY_LAST))
+
 def process_single_page(mid, offset):
-    """处理单页动态并返回下一页offset"""
+    """处理单页动态并返回下一页offset（带延迟）"""
     url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
     params = {"host_mid": mid, "offset": offset}
     
     try:
+        # 添加请求前延迟
+        random_delay()
         response = requests.get(url, headers=HEADERS, params=params, timeout=15)
         response.raise_for_status()
         data = json.loads(response.text)
@@ -46,7 +54,7 @@ def process_single_page(mid, offset):
         return None, None
 
 def process_single_dynamic(item):
-    """处理单个动态"""
+    """处理单个动态（带延迟）"""
     try:
         # 解析动态信息
         dynamic_type = DYNAMIC_TYPE_MAP.get(item["type"], 17)
@@ -66,14 +74,15 @@ def process_single_dynamic(item):
         
         for idx, img_url in enumerate(images, 1):
             download_image(img_url, save_folder)
-            if idx % 5 == 0:  # 每下载5张暂停一下
-                time.sleep(1)
+            # 每下载5张添加额外延迟
+            if idx % 5 == 0:
+                random_delay()
     
     except Exception as e:
         print(f"处理动态失败: {str(e)}")
 
 def get_all_replies(oid, dynamic_type):
-    """获取全部评论图片（优化版）"""
+    """获取全部评论图片（带延迟）"""
     images = []
     next_page = 0
     retry_count = 3
@@ -91,6 +100,7 @@ def get_all_replies(oid, dynamic_type):
         success = False
         for _ in range(retry_count):
             try:
+                random_delay()  # 评论请求前延迟
                 response = requests.get(url, headers=HEADERS, params=params, timeout=10)
                 response.raise_for_status()
                 data = json.loads(response.text)
@@ -112,7 +122,6 @@ def get_all_replies(oid, dynamic_type):
                 
                 next_page = data["data"]["cursor"]["next"]
                 success = True
-                time.sleep(0.8)  # 评论翻页间隔
                 break
                 
             except Exception as e:
@@ -130,7 +139,7 @@ def extract_images_from_reply(reply):
     return []
 
 def download_image(url, folder):
-    """增强版下载函数"""
+    """增强版下载函数（带延迟）"""
     filename = url.split("/")[-1].split("?")[0]
     filepath = os.path.join(folder, filename)
     
@@ -139,6 +148,7 @@ def download_image(url, folder):
     
     for attempt in range(3):
         try:
+            random_delay()  # 下载前延迟
             response = requests.get(url, headers=HEADERS, stream=True, timeout=20)
             response.raise_for_status()
             
@@ -158,8 +168,8 @@ def main(mid):
     os.makedirs(SAVE_PATH, exist_ok=True)
     has_more = True
     offset = ""
-    
     page_num = 1
+    
     while has_more:
         print(f"\n正在获取第 {page_num} 页动态...")
         has_more, new_offset = process_single_page(mid, offset)
@@ -172,7 +182,8 @@ def main(mid):
         if has_more:
             offset = new_offset
             page_num += 1
-            time.sleep(2)  # 动态翻页间隔
+            # 动态翻页后延迟
+            time.sleep(random.uniform(1.0, 1.5))  # 翻页大间隔
         else:
             print("\n所有动态已处理完毕")
 
