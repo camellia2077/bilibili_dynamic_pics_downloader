@@ -1,7 +1,3 @@
-#支持从失败的url下载
-#第一个是因为没有使用正确的cookie导致无法爬取的时候输出请在程序输入正确的cookie，
-#第二是unsaved_url不仅要有保存失败的url，还要有这个url保存失败的原因
-#全局变量控制长度
 import os
 import re
 import json
@@ -11,7 +7,7 @@ import datetime
 import random
 #2025 2 6
 FILE_NAME_MAX_LENGTH = 40
-COOKIE = "_uuid="
+COOKIE = "_uuid=FAA377D6-ED9F-310BC-519A-42C2B9B91062F10710infoc; buvid_fp=075b92ba210dd98d64009eaf6c2cbc64; buvid3=11EF371E-DBF9-D8D2-2B7D-5D0CE0A3AF4A22211infoc; b_nut=1732329713; header_theme_version=CLOSE; enable_web_push=DISABLE; match_float_version=ENABLE; DedeUserID=6967383; DedeUserID__ckMd5=9eb8b539885d768e; rpdid=|(u)YJJl~Rk~0J'u~JkJJJ)u~; buvid4=828502D2-463E-0EEA-9493-3B1F42F715AD66991-022073012-37bAVZ3%2FgV8gtfbxn3o9vQ%3D%3D; home_feed_column=4; fingerprint=075b92ba210dd98d64009eaf6c2cbc64; hit-dyn-v2=1; share_source_origin=COPY; CURRENT_QUALITY=80; enable_feed_channel=DISABLE; LIVE_BUVID=AUTO2617385612857275; PVID=1; browser_resolution=1111-511; CURRENT_FNVAL=4048; bp_t_offset_6967383=1032327322675445760; SESSDATA=e62d716a%2C1754799374%2Cfb6ef%2A22CjCkUNd-3W6Mwafpx0hT8bSxQ4qEGask7W3LrcDud4JAcdrC2w9WQNIxVWJBq178W04SVjdxQ0JyaDlGYmJmZ2ZMMGRmWGJ2VkMyNG1KN3hLc1U5MGlHTG9TVHdrT090c0FuQVpSQ01UQnZ1aTREY2JyQ0xRT2NYQ3BtSnhzUXB0cG5lNGM5ajhRIIEC; bili_jct=6e31b31455e4a586d6bf3af2edc8499a; sid=5h9f7jpl; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzk1MTE5NTMsImlhdCI6MTczOTI1MjY5MywicGx0IjotMX0.fLrYQGoDaEVryYMUAyeKXrF88quIc3sa2qlWlZuLkxs; bili_ticket_expires=1739511893; bsource=search_baidu; b_lsid=F53E2353_194F3DE9AF7"
 DELAY_FIRST = 0.5
 DELAY_LAST = 0.6
 # =======================
@@ -259,6 +255,7 @@ class BilibiliDynamicSpider:
         self.failed_list = []
 
     def run(self):
+        #api接口
         base_url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/space_history"
         params = {"host_uid": self.config.uid, "offset_dynamic_id": 0}
         has_more = True
