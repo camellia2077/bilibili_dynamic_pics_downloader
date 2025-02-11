@@ -1,0 +1,2 @@
+# bilibili_dynamic_pics_download
+bilibili动态图片以及动态图片的评论区的图片下载
