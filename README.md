@@ -1,5 +1,11 @@
 # bilibili_dynamic_pics_download
 bilibili用户动态中的图片，以及动态评论区的图片下载
+# 环境配置
+1按住Win + R,输入cmd,打开cmd
+
+2输入pip install requests
+
+3输入pip install json
 # 使用说明
 1修改全局变量COOKIE的值为你登录之后的获取的全局变量
 
