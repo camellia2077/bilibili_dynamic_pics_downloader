@@ -1,62 +1,190 @@
 import os
-import re
-import time
 import requests
+import json
+from datetime import datetime
+import time
 
-def download_images_with_cookie(oid, cookie, save_dir='images'):
-    os.makedirs(save_dir, exist_ok=True)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': f'https://www.bilibili.com/opus/{oid}',
-        'Cookie': cookie  # 关键身份参数
-    }
+#这个程序会遍历所有的程序再开始保存
+
+# 全局配置
+COOKIE = "_uuid="
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Referer": "https://www.bilibili.com/",
+    "Cookie": COOKIE
+}
+SAVE_PATH = "C:\Base1\srt"
+
+# 动态类型映射表
+DYNAMIC_TYPE_MAP = {
+    "DYNAMIC_TYPE_DRAW": 11,
+    "DYNAMIC_TYPE_WORD": 17,
+    "DYNAMIC_TYPE_FORWARD": 17
+}
+
+def get_all_dynamics(mid):
+    """获取用户全部动态（分页版）"""
+    all_dynamics = []
+    offset = ""
+    has_more = True
+    retry_count = 3
     
-    page = 1
-    image_urls = set()  # 去重容器
-    while True:
-        api_url = f'https://api.bilibili.com/x/v2/reply/main?oid={oid}&type=17&next={page}'
-        try:
-            resp = requests.get(api_url, headers=headers, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            
-            if data.get('code') != 0 or not data['data']['replies']:
-                print('已到达最后一页或接口异常')
+    while has_more:
+        url = "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space"
+        params = {
+            "host_mid": mid,
+            "offset": offset,
+            "offset_dynamic_id": 0
+        }
+        
+        for _ in range(retry_count):
+            try:
+                response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+                response.raise_for_status()
+                data = json.loads(response.text)
+                
+                if data["code"] != 0:
+                    print(f"API返回错误: {data['message']}")
+                    return []
+                
+                # 处理动态数据
+                for item in data["data"]["items"]:
+                    dynamic_type = DYNAMIC_TYPE_MAP.get(item["type"], 17)
+                    
+                    # 提取真实oid
+                    if dynamic_type == 11:
+                        oid = item["modules"]["module_dynamic"]["major"]["draw"]["id"]
+                    else:
+                        oid = item["id_str"]
+                    
+                    timestamp = item["modules"]["module_author"]["pub_ts"]
+                    pub_date = datetime.fromtimestamp(timestamp)
+                    
+                    all_dynamics.append({
+                        "oid": oid,
+                        "pub_date": pub_date,
+                        "type": dynamic_type
+                    })
+                
+                # 更新分页参数
+                has_more = data["data"]["has_more"]
+                offset = data["data"]["offset"]
+                time.sleep(1)  # 添加请求间隔
                 break
                 
-            # 解析图片URL（正则匹配示例）
-            pattern = re.compile(r'https?://i\d\.hdslb\.com/bfs/[^\s"]+\.(jpg|png|gif)')
-            for reply in data['data']['replies']:
-                urls = pattern.findall(reply['content']['message'])
-                image_urls.update(urls)
+            except Exception as e:
+                print(f"请求失败: {str(e)}，剩余重试次数：{retry_count-1}")
+                time.sleep(3)
+                if _ == retry_count-1:
+                    has_more = False
+                continue
                 
-                # 处理子评论
-                if reply.get('replies'):
-                    for sub_reply in reply['replies']:
-                        sub_urls = pattern.findall(sub_reply['content']['message'])
-                        image_urls.update(sub_urls)
-            
-            print(f'第 {page} 页解析完成，累计发现图片 {len(image_urls)} 张')
-            page += 1
-            time.sleep(1.5)  # 降低请求频率
-            
-        except Exception as e:
-            print(f'请求失败: {str(e)}')
-            break
-    
-    # 下载图片
-    for idx, url in enumerate(image_urls):
-        try:
-            resp = requests.get(url, headers=headers, stream=True, timeout=15)
-            if resp.status_code == 200:
-                ext = url.split('.')[-1]
-                with open(os.path.join(save_dir, f'image_{idx}.{ext}'), 'wb') as f:
-                    for chunk in resp.iter_content(1024):
-                        f.write(chunk)
-                print(f'已下载: {url}')
-        except Exception as e:
-            print(f'下载失败 {url}: {str(e)}')
+    return all_dynamics
 
-# 使用示例（替换为你的Cookie）
-YOUR_COOKIE = "_uuid=FAA377D6-ED9F-310BC-519A-42C2B9B91062F10710infoc; buvid_fp=075b92ba210dd98d64009eaf6c2cbc64; buvid3=11EF371E-DBF9-D8D2-2B7D-5D0CE0A3AF4A22211infoc; b_nut=1732329713; header_theme_version=CLOSE; enable_web_push=DISABLE; match_float_version=ENABLE; DedeUserID=6967383; DedeUserID__ckMd5=9eb8b539885d768e; rpdid=|(u)YJJl~Rk~0J'u~JkJJJ)u~; buvid4=828502D2-463E-0EEA-9493-3B1F42F715AD66991-022073012-37bAVZ3%2FgV8gtfbxn3o9vQ%3D%3D; home_feed_column=4; fingerprint=075b92ba210dd98d64009eaf6c2cbc64; hit-dyn-v2=1; share_source_origin=COPY; CURRENT_QUALITY=80; enable_feed_channel=DISABLE; LIVE_BUVID=AUTO2617385612857275; PVID=1; browser_resolution=1111-511; CURRENT_FNVAL=4048; bp_t_offset_6967383=1032327322675445760; SESSDATA=e62d716a%2C1754799374%2Cfb6ef%2A22CjCkUNd-3W6Mwafpx0hT8bSxQ4qEGask7W3LrcDud4JAcdrC2w9WQNIxVWJBq178W04SVjdxQ0JyaDlGYmJmZ2ZMMGRmWGJ2VkMyNG1KN3hLc1U5MGlHTG9TVHdrT090c0FuQVpSQ01UQnZ1aTREY2JyQ0xRT2NYQ3BtSnhzUXB0cG5lNGM5ajhRIIEC; bili_jct=6e31b31455e4a586d6bf3af2edc8499a; sid=5h9f7jpl; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzk1MTE5NTMsImlhdCI6MTczOTI1MjY5MywicGx0IjotMX0.fLrYQGoDaEVryYMUAyeKXrF88quIc3sa2qlWlZuLkxs; bili_ticket_expires=1739511893; b_lsid=9126CB86_194F38B4B3A; bsource=search_bing"
-download_images_with_cookie('1030011609485934617', YOUR_COOKIE)
+def get_all_replies(oid, dynamic_type):
+    """获取全部评论（包含子评论）"""
+    all_images = []
+    next_page = 0
+    retry_count = 3
+    
+    while True:
+        url = "https://api.bilibili.com/x/v2/reply/main"
+        params = {
+            "type": dynamic_type,
+            "oid": oid,
+            "mode": 3,
+            "next": next_page
+        }
+        
+        for _ in range(retry_count):
+            try:
+                response = requests.get(url, headers=HEADERS, params=params, timeout=10)
+                response.raise_for_status()
+                data = json.loads(response.text)
+                
+                if data["code"] != 0:
+                    print(f"评论接口错误: {data['message']}")
+                    return []
+                
+                # 处理当前页评论
+                for reply in data["data"]["replies"]:
+                    if reply.get("content", {}).get("pictures"):
+                        all_images.extend(pic["img_src"] for pic in reply["content"]["pictures"])
+                    
+                    # 处理子评论
+                    if reply.get("replies"):
+                        for sub_reply in reply["replies"]:
+                            if sub_reply.get("content", {}).get("pictures"):
+                                all_images.extend(pic["img_src"] for pic in sub_reply["content"]["pictures"])
+                
+                # 更新分页参数
+                if data["data"]["cursor"]["is_end"]:
+                    return all_images
+                
+                next_page = data["data"]["cursor"]["next"]
+                time.sleep(0.5)  # 评论请求间隔
+                break
+                
+            except Exception as e:
+                print(f"评论请求失败: {str(e)}，剩余重试次数：{retry_count-1}")
+                time.sleep(2)
+                if _ == retry_count-1:
+                    return all_images
+                continue
+
+def download_image(url, folder):
+    """改进的下载函数"""
+    filename = url.split("/")[-1].split("?")[0]
+    filepath = os.path.join(folder, filename)
+    
+    if os.path.exists(filepath):
+        print(f"文件已存在: {filename}")
+        return
+    
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=HEADERS, stream=True, timeout=15)
+            response.raise_for_status()
+            
+            with open(filepath, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            print(f"下载成功: {filename}")
+            return
+        except Exception as e:
+            print(f"下载失败({attempt+1}/3): {filename} - {str(e)}")
+            time.sleep(2)
+    
+    print(f"无法下载: {filename}")
+
+def main(mid):
+    os.makedirs(SAVE_PATH, exist_ok=True)
+    
+    print("开始获取动态列表...")
+    dynamics = get_all_dynamics(mid)
+    print(f"共找到 {len(dynamics)} 条动态")
+    
+    for index, dynamic in enumerate(dynamics, 1):
+        try:
+            # 生成带连字符的日期格式
+            folder_name = dynamic["pub_date"].strftime("%Y-%m-%d")
+            save_folder = os.path.join(SAVE_PATH, folder_name)
+            os.makedirs(save_folder, exist_ok=True)
+            
+            print(f"\n处理动态 {index}/{len(dynamics)}")
+            print(f"动态ID: {dynamic['oid']} | 类型: {dynamic['type']} | 发布时间: {folder_name}")
+            
+            images = get_all_replies(dynamic["oid"], dynamic["type"])
+            print(f"发现 {len(images)} 张图片")
+            
+            for img_url in images:
+                download_image(img_url, save_folder)
+                
+        except Exception as e:
+            print(f"处理动态 {dynamic['oid']} 时出错: {str(e)}")
+            continue
+
+if __name__ == "__main__":
+    USER_MID = "560647"
+    main(USER_MID)
