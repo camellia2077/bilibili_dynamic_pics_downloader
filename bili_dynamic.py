@@ -6,10 +6,13 @@ import requests
 import datetime
 import random
 #2025 2 6
-FILE_NAME_MAX_LENGTH = 40
-COOKIE = "_uuid=FAA377D6-ED9F-310BC-519A-42C2B9B91062F10710infoc; buvid_fp=075b92ba210dd98d64009eaf6c2cbc64; buvid3=11EF371E-DBF9-D8D2-2B7D-5D0CE0A3AF4A22211infoc; b_nut=1732329713; header_theme_version=CLOSE; enable_web_push=DISABLE; match_float_version=ENABLE; DedeUserID=6967383; DedeUserID__ckMd5=9eb8b539885d768e; rpdid=|(u)YJJl~Rk~0J'u~JkJJJ)u~; buvid4=828502D2-463E-0EEA-9493-3B1F42F715AD66991-022073012-37bAVZ3%2FgV8gtfbxn3o9vQ%3D%3D; home_feed_column=4; fingerprint=075b92ba210dd98d64009eaf6c2cbc64; hit-dyn-v2=1; share_source_origin=COPY; CURRENT_QUALITY=80; enable_feed_channel=DISABLE; LIVE_BUVID=AUTO2617385612857275; PVID=1; browser_resolution=1111-511; CURRENT_FNVAL=4048; bp_t_offset_6967383=1032327322675445760; SESSDATA=e62d716a%2C1754799374%2Cfb6ef%2A22CjCkUNd-3W6Mwafpx0hT8bSxQ4qEGask7W3LrcDud4JAcdrC2w9WQNIxVWJBq178W04SVjdxQ0JyaDlGYmJmZ2ZMMGRmWGJ2VkMyNG1KN3hLc1U5MGlHTG9TVHdrT090c0FuQVpSQ01UQnZ1aTREY2JyQ0xRT2NYQ3BtSnhzUXB0cG5lNGM5ajhRIIEC; bili_jct=6e31b31455e4a586d6bf3af2edc8499a; sid=5h9f7jpl; bili_ticket=eyJhbGciOiJIUzI1NiIsImtpZCI6InMwMyIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mzk1MTE5NTMsImlhdCI6MTczOTI1MjY5MywicGx0IjotMX0.fLrYQGoDaEVryYMUAyeKXrF88quIc3sa2qlWlZuLkxs; bili_ticket_expires=1739511893; bsource=search_baidu; b_lsid=F53E2353_194F3DE9AF7"
+FILE_NAME_MAX_LENGTH = 25
+COOKIE = ""
 DELAY_FIRST = 0.5
 DELAY_LAST = 0.6
+
+# 文件夹命名的时候，内容合并连续空格
+
 # =======================
 # 配置类:获取用户输入,保存基本配置信息
 # =======================
@@ -86,13 +89,14 @@ class Utils:
         # 去除非法字符
         name = re.sub(Utils.ILLEGAL_CHAR_PATTERN, '', name)
         # 这个方法会移除字符串开头和结尾处的所有空白字符（例如空格、制表符、换行符等）。
-        name = name.strip()
-        #这个方法会移除字符串开头和结尾处的所有空白字符以及句点（.）
-        #注意：如果在调用 strip(" .") 之前已经调用了 strip()，那么前者主要作用是
-        #确保开头和结尾没有句点和空格。通常可以只用一次 strip(" .") 达到效果，因为它也会移除空白字符。
+        # 合并连续空格
+        name = re.sub(r'\s+', ' ', name)
+        # 去除首尾空白和句点
         name = name.strip(" .")
+
+        # 截断前再次检查长度（防止截断后残留非法后缀）
         if len(name) > FILE_NAME_MAX_LENGTH:
-            name = name[:FILE_NAME_MAX_LENGTH]
+            name = name[:FILE_NAME_MAX_LENGTH].rstrip(" .")  # 截断后再次去除末尾非法字符
         return name
     
     @staticmethod
@@ -302,14 +306,26 @@ class BilibiliDynamicSpider:
                 print("处理页面时发生错误:", e)
                 break
 
-        # 将本次成功的 URL 追加写入 saved_url.txt
+        # ================= 关键修改部分开始 =================
+        # 加载已存在的未保存URL（保留历史记录）
+        existing_unsaved = self.file_manager.load_url_set(self.config.unsaved_url_filename)
+        # 合并所有失败URL（新旧结合）
+        all_failed_urls = existing_unsaved.union(set(self.failed_list))
+        # 移除已成功的URL（即使之前失败过）
+        all_failed_urls -= set(self.success_list)
+        # 覆盖写入未保存URL文件
+        self.file_manager.write_url_file(
+            self.config.unsaved_url_filename, 
+            list(all_failed_urls)  # 转换为列表
+        )
+        # 追加成功URL到已保存文件
         if self.success_list:
-            self.file_manager.append_url_file(self.config.saved_url_filename, self.success_list)
-        # 将本次失败的 URL 及原因覆盖写入 unsaved_url.txt
-        self.file_manager.write_url_file(self.config.unsaved_url_filename, self.failed_list)
+            self.file_manager.append_url_file(
+                self.config.saved_url_filename, 
+                self.success_list
+            )
+        # ================= 关键修改部分结束 =================
 
-        print("下载完成！")
-        print(f"成功处理 {len(self.success_list)} 条动态,失败 {len(self.failed_list)} 条。")
 # =======================
 # 新增重试失败URL的类
 # =======================
@@ -448,7 +464,7 @@ class RetryFailedUrls:
         print(f"重试完成! 成功{success_count}/{total_count}条")
         if retry_queue:
             print(f"以下URL仍然失败:\n" + "\n".join(retry_queue))
-
+#操作菜单
 class OperationMenu:
     def __init__(self, config, file_manager, dynamic_processor):
         """
@@ -482,9 +498,7 @@ class OperationMenu:
             else:
                 print("无效输入，请重新选择")
 
-# =======================
-# 修改后的主函数
-# =======================
+# 主函数
 def main():
     # 初始化配置
     config = Config()
