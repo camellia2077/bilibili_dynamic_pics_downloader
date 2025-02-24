@@ -11,13 +11,10 @@ import random
 # 全局配置
 FILE_NAME_MAX_LENGTH = 25
 COOKIE = "fucj"
-DELAY_FIRST = 0.5
-DELAY_LAST = 0.6
+DELAY_FIRST = 0.4
+DELAY_LAST = 0.9
 
-# =======================
-# 配置类: 获取用户输入, 保存基本配置信息
-# =======================
-class Config:
+class Config:# 配置类: 获取用户输入, 保存基本配置信息
     def __init__(self, uid_list=None, interval=None):
         self.COOKIE = self.get_cookie()
         self.uid_list = uid_list if uid_list else self.get_uid_list()
@@ -48,7 +45,11 @@ class Config:
         uid_input = input("请输入用户UID（多个UID用逗号分隔，默认560647,18343098,2075682）:").strip()
         if uid_input:
             uid_list = [uid.strip() for uid in uid_input.split(',')]
-        else:
+        
+        #坂坂白_560647 河野华_18343098 Kitaro绮太郎_2075682
+        #病院坂saki_4096581 粽子淞_31968078 走路摇ZLY_356010767
+        #
+        else:#默认下载的用户uid list
             uid_list = ["560647", "18343098", "2075682"]
         return uid_list
 
@@ -102,8 +103,8 @@ class Config:
         return None
 
     def get_interval(self):
-        interval = input("请输入下载间隔(秒，默认3):").strip()
-        return float(interval) if interval else 3
+        interval = int(input("请输入int下载间隔(秒，默认3):").strip())
+        return int(interval) if interval else 3
 
     def update_for_uid(self, uid):
         self.uid = uid
