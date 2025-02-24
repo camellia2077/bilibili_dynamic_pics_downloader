@@ -5,10 +5,11 @@ import time
 import requests
 import datetime
 import random
-#2025 2 24 新增实时保存成功和失败的url到txt
+
+#2025 2 24增加cookie检验
 # 全局配置
 FILE_NAME_MAX_LENGTH = 25
-COOKIE = ""
+COOKIE = "fucj"
 DELAY_FIRST = 0.5
 DELAY_LAST = 0.6
 
@@ -28,13 +29,16 @@ class Config:
             os.makedirs(self.download_dir)
 
     def get_cookie(self):
-        if COOKIE.strip():
+        global COOKIE
+        # 检查 COOKIE 是否存在且非空（去除首尾空格后）
+        if len(COOKIE) > 10:
             return COOKIE
-        cookie = input("请输入B站Cookie（必填）:").strip()
-        while not cookie:
-            print("Cookie不能为空，请重新输入。")
-            cookie = input("请输入B站Cookie（必填）:").strip()
-        return cookie
+        else:
+            while len(COOKIE) < 10:
+                print ("cookie小于10,长度太短,应该是错误的,请重新输入")
+                COOKIE = input("请输入B站Cookie(必填):").strip()
+            return COOKIE     
+
 
     def get_username(self):
         url = f"https://api.bilibili.com/x/space/acc/info?mid={self.uid}"
@@ -179,6 +183,10 @@ class DynamicProcessor:
         self.file_manager = file_manager
         self.downloader = downloader
         self.saved_url_set = saved_url_set
+        # 创建 txt 文件夹
+        self.txt_folder = os.path.join(self.config.download_dir, "txt")
+        if not os.path.exists(self.txt_folder):
+            os.makedirs(self.txt_folder)
 
     def process_dynamic(self, dynamic, success_list, failed_list):
         dynamic_url = None
@@ -205,45 +213,57 @@ class DynamicProcessor:
                 dynamic_content = item.get("description", item.get("content", ""))
 
             has_content = bool(dynamic_content.strip())
-            if has_content:
-                content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
-                folder_name = f"{time_str}-{content_clean}".replace(" ", "-")
-                folder_name = Utils.sanitize_filename(folder_name, FILE_NAME_MAX_LENGTH)
-                dynamic_folder = os.path.join(self.config.download_dir, folder_name)
-            else:
-                null_folder = os.path.join(self.config.download_dir, "null")
-                if not os.path.exists(null_folder):
-                    os.makedirs(null_folder)
-                dynamic_folder = os.path.join(null_folder, dynamic_id)
-
-            if not os.path.isdir(dynamic_folder):
-                if os.path.exists(dynamic_folder):
-                    os.remove(dynamic_folder)
-                os.makedirs(dynamic_folder)
-                print(f"创建文件夹: {dynamic_folder}")
-            else:
-                print(f"文件夹已存在: {dynamic_folder}")
-
-            info_path = os.path.join(dynamic_folder, "info.txt")
-            with open(info_path, 'w', encoding='utf-8') as f:
-                f.write(f"URL: {dynamic_url}\n")
-                f.write(f"发布时间: {time_str}\n")
-                f.write("内容:\n")
-                f.write(dynamic_content)
-            print(f"保存动态信息到: {info_path}")
-
             pics = card_dict.get("item", {}).get("pictures", [])
-            for idx, pic in enumerate(pics, start=1):
-                img_url = pic.get("img_src")
-                if not img_url:
-                    continue
-                ext = os.path.splitext(img_url)[1] or ".jpg"
-                img_filename = f"{idx}{ext}"
-                img_path = os.path.join(dynamic_folder, img_filename)
-                print(f"下载图片: {img_url}")
-                self.downloader.download_file(img_url, img_path)
 
-            # 实时保存成功的 URL
+            if not pics:
+                # 没有图片，保存到 txt 文件夹
+                txt_filename = f"{time_str}-{dynamic_id}.txt"
+                txt_path = os.path.join(self.txt_folder, txt_filename)
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(f"URL: {dynamic_url}\n")
+                    f.write(f"发布时间: {time_str}\n")
+                    f.write("内容:\n")
+                    f.write(dynamic_content)
+                print(f"保存无图片动态到: {txt_path}")
+            else:
+                # 有图片的处理逻辑保持不变
+                if has_content:
+                    content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
+                    folder_name = f"{time_str}-{content_clean}".replace(" ", "-")
+                    folder_name = Utils.sanitize_filename(folder_name, FILE_NAME_MAX_LENGTH)
+                    dynamic_folder = os.path.join(self.config.download_dir, folder_name)
+                else:
+                    null_folder = os.path.join(self.config.download_dir, "null")
+                    if not os.path.exists(null_folder):
+                        os.makedirs(null_folder)
+                    dynamic_folder = os.path.join(null_folder, dynamic_id)
+
+                if not os.path.isdir(dynamic_folder):
+                    if os.path.exists(dynamic_folder):
+                        os.remove(dynamic_folder)
+                    os.makedirs(dynamic_folder)
+                    print(f"创建文件夹: {dynamic_folder}")
+                else:
+                    print(f"文件夹已存在: {dynamic_folder}")
+
+                info_path = os.path.join(dynamic_folder, "info.txt")
+                with open(info_path, 'w', encoding='utf-8') as f:
+                    f.write(f"URL: {dynamic_url}\n")
+                    f.write(f"发布时间: {time_str}\n")
+                    f.write("内容:\n")
+                    f.write(dynamic_content)
+                print(f"保存动态信息到: {info_path}")
+
+                for idx, pic in enumerate(pics, start=1):
+                    img_url = pic.get("img_src")
+                    if not img_url:
+                        continue
+                    ext = os.path.splitext(img_url)[1] or ".jpg"
+                    img_filename = f"{idx}{ext}"
+                    img_path = os.path.join(dynamic_folder, img_filename)
+                    print(f"下载图片: {img_url}")
+                    self.downloader.download_file(img_url, img_path)
+
             self.saved_url_set.add(dynamic_url)
             with open(self.config.saved_url_filename, 'a', encoding='utf-8') as f:
                 f.write(dynamic_url + "\n")
@@ -251,7 +271,6 @@ class DynamicProcessor:
         except Exception as e:
             print("处理动态出错:", e)
             if dynamic_url:
-                # 实时保存失败的 URL
                 with open(self.config.unsaved_url_filename, 'a', encoding='utf-8') as f:
                     f.write(dynamic_url + "\n")
                 failed_list.append(dynamic_url)
