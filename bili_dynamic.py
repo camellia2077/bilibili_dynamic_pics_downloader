@@ -103,7 +103,8 @@ class Config:# 配置类: 获取用户输入, 保存基本配置信息
         return None
 
     def get_interval(self):
-        interval = int(input("请输入int下载间隔(秒，默认3):").strip())
+        interval = input("请输入int下载间隔(秒，默认3):").strip()
+        interval = int(interval)
         return int(interval) if interval else 3
 
     def update_for_uid(self, uid):
