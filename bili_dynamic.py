@@ -6,7 +6,9 @@ import requests
 import datetime
 import random
 
-#2025 2 24增加cookie检验
+#批量uid批量下载
+#增加下载完成后重新输入新的uid 的选项
+
 # 全局配置
 FILE_NAME_MAX_LENGTH = 25
 COOKIE = "fucj"
@@ -17,65 +19,77 @@ DELAY_LAST = 0.6
 # 配置类: 获取用户输入, 保存基本配置信息
 # =======================
 class Config:
-    def __init__(self, download_dir=None, uid=None, interval=None):
-        self.COOKIE = self.get_cookie()  # 动态获取 Cookie
-        self.uid = uid or self.get_uid()
-        self.download_dir = download_dir or self.get_download_dir()  # 修改为先遍历目录
-        self.username = self.get_username()  # 获取用户名
+    def __init__(self, uid_list=None, interval=None):
+        self.COOKIE = self.get_cookie()
+        self.uid_list = uid_list if uid_list else self.get_uid_list()
+        self.uid = None  # 当前处理的 UID
+        self.download_dir = None
+        self.username = None
         self.interval = interval or self.get_interval()
-        self.saved_url_filename = os.path.join(self.download_dir, "saved_url.txt")
-        self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.txt")
-        if not os.path.exists(self.download_dir):
-            os.makedirs(self.download_dir)
+        self.username_cache = {}  # 用于缓存用户名
+        self.saved_url_filename = None
+        self.unsaved_url_filename = None
+        # Prompt for base directory
+        base_dir_input = input("请输入保存文件的基目录（默认 C:\\Base1\\bili）:").strip()
+        self.base_dir = base_dir_input if base_dir_input else "C:\\Base1\\bili"
+        if not os.path.exists(self.base_dir):
+            os.makedirs(self.base_dir)
 
     def get_cookie(self):
         global COOKIE
-        # 检查 COOKIE 是否存在且非空（去除首尾空格后）
         if len(COOKIE) > 10:
             return COOKIE
         else:
             while len(COOKIE) < 10:
-                print ("cookie小于10,长度太短,应该是错误的,请重新输入")
+                print("cookie小于10,长度太短,应该是错误的,请重新输入")
                 COOKIE = input("请输入B站Cookie(必填):").strip()
-            return COOKIE     
+            return COOKIE
 
+    def get_uid_list(self):
+        uid_input = input("请输入用户UID（多个UID用逗号分隔，默认560647,18343098,2075682）:").strip()
+        if uid_input:
+            uid_list = [uid.strip() for uid in uid_input.split(',')]
+        else:
+            uid_list = ["560647", "18343098", "2075682"]
+        return uid_list
 
-    def get_username(self):
-        url = f"https://api.bilibili.com/x/space/acc/info?mid={self.uid}"
+    def get_username(self, uid):
+        if uid in self.username_cache:
+            return self.username_cache[uid]
+        
+        url = f"https://api.bilibili.com/x/space/acc/info?mid={uid}"
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36",
             "Cookie": self.COOKIE
         }
         try:
+            time.sleep(2)  # 增加请求间隔
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 if data.get("code") == 0:
-                    return data.get("data", {}).get("name", f"用户_{self.uid}")
+                    username = data.get("data", {}).get("name", f"用户_{uid}")
+                    self.username_cache[uid] = username
+                    return username
                 else:
                     print(f"获取用户名失败: {data.get('message')}")
             else:
                 print(f"API请求失败，状态码: {response.status_code}")
         except Exception as e:
             print(f"获取用户名异常: {e}")
-        return f"用户_{self.uid}"
+        return f"用户_{uid}"
 
-    def get_download_dir(self):
-        base_dir = input("请输入基础下载目录(默认为 C:\Base1\\bbb\\bili):").strip()
-        base_dir = base_dir if base_dir else r"C:\Base1\bbb\bili"
-        
-        # 遍历基础目录下的子文件夹，查找与 UID 匹配的文件夹
+    def get_download_dir(self, base_dir, uid):
         for subdir in os.listdir(base_dir):
             subdir_path = os.path.join(base_dir, subdir)
             if os.path.isdir(subdir_path):
                 extracted_uid = self.extract_uid_from_folder_name(subdir)
-                if extracted_uid == self.uid:
+                if extracted_uid == uid:
                     print(f"找到匹配的文件夹: {subdir_path}")
                     return subdir_path
         
-        # 如果没有找到匹配的文件夹，创建新的
-        username = self.get_username()
-        new_folder_name = f"{username}_{self.uid}"
+        username = self.get_username(uid)
+        new_folder_name = f"{username}_{uid}"
         new_folder_path = os.path.join(base_dir, new_folder_name)
         os.makedirs(new_folder_path, exist_ok=True)
         print(f"创建新文件夹: {new_folder_path}")
@@ -88,13 +102,18 @@ class Config:
             return match.group()
         return None
 
-    def get_uid(self):
-        uid = input("请输入用户UID(默认560647):").strip()
-        return uid if uid else "560647"
-
     def get_interval(self):
         interval = input("请输入下载间隔(秒，默认3):").strip()
         return float(interval) if interval else 3
+
+    def update_for_uid(self, uid):
+        self.uid = uid
+        self.username = self.get_username(uid)
+        self.download_dir = self.get_download_dir(self.base_dir, uid)
+        self.saved_url_filename = os.path.join(self.download_dir, "saved_url.txt")
+        self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.txt")
+        if not os.path.exists(self.download_dir):
+            os.makedirs(self.download_dir)
 
 # =======================
 # 文件操作类: 处理文件的读写、存在性检查等
@@ -183,7 +202,6 @@ class DynamicProcessor:
         self.file_manager = file_manager
         self.downloader = downloader
         self.saved_url_set = saved_url_set
-        # 创建 txt 文件夹
         self.txt_folder = os.path.join(self.config.download_dir, "txt")
         if not os.path.exists(self.txt_folder):
             os.makedirs(self.txt_folder)
@@ -216,7 +234,6 @@ class DynamicProcessor:
             pics = card_dict.get("item", {}).get("pictures", [])
 
             if not pics:
-                # 没有图片，保存到 txt 文件夹
                 txt_filename = f"{time_str}-{dynamic_id}.txt"
                 txt_path = os.path.join(self.txt_folder, txt_filename)
                 with open(txt_path, 'w', encoding='utf-8') as f:
@@ -226,7 +243,6 @@ class DynamicProcessor:
                     f.write(dynamic_content)
                 print(f"保存无图片动态到: {txt_path}")
             else:
-                # 有图片的处理逻辑保持不变
                 if has_content:
                     content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
                     folder_name = f"{time_str}-{content_clean}".replace(" ", "-")
@@ -284,7 +300,7 @@ class BilibiliDynamicSpider:
         self.file_manager = file_manager
         self.dynamic_processor = dynamic_processor
         self.saved_url_set = self.file_manager.load_url_set(self.config.saved_url_filename)
-        self.dynamic_processor.saved_url_set = self.saved_url_set  # 共享 saved_url_set
+        self.dynamic_processor.saved_url_set = self.saved_url_set
         self.success_list = []
         self.failed_list = []
 
@@ -426,10 +442,9 @@ class RetryFailedUrls:
 # 操作菜单
 # =======================
 class OperationMenu:
-    def __init__(self, config, file_manager, dynamic_processor):
+    def __init__(self, config, downloader):
         self.config = config
-        self.file_manager = file_manager
-        self.dynamic_processor = dynamic_processor
+        self.downloader = downloader
 
     def run(self):
         while True:
@@ -437,30 +452,50 @@ class OperationMenu:
                 "\n请选择操作:\n"
                 "1. 开始新抓取\n"
                 "2. 重试失败URL\n"
-                "3. 退出\n请输入数字: "
+                "3. 退出\n"
+                "4. 修改UID\n请输入数字: "
             ).strip()
             if choice == "1":
-                spider = BilibiliDynamicSpider(self.config, self.file_manager, self.dynamic_processor)
-                spider.run()
+                for uid in self.config.uid_list:
+                    print(f"\n开始下载UID: {uid}")
+                    self.config.update_for_uid(uid)
+                    file_manager = FileManager(self.config)
+                    saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set)
+                    spider = BilibiliDynamicSpider(self.config, file_manager, dynamic_processor)
+                    spider.run()
             elif choice == "2":
-                retry = RetryFailedUrls(self.config, self.file_manager, self.dynamic_processor)
-                retry.run()
+                for uid in self.config.uid_list:
+                    print(f"\n重试UID: {uid} 的失败URL")
+                    self.config.update_for_uid(uid)
+                    file_manager = FileManager(self.config)
+                    saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set)
+                    retry = RetryFailedUrls(self.config, file_manager, dynamic_processor)
+                    retry.run()
             elif choice == "3":
                 print("程序退出")
                 break
+            elif choice == "4":
+                self.change_uid()
             else:
                 print("无效输入，请重新选择")
+
+    def change_uid(self):
+        new_uid_input = input("请输入新的UID（多个UID用逗号分隔）: ").strip()
+        if new_uid_input:
+            self.config.uid_list = [uid.strip() for uid in new_uid_input.split(',')]
+            print(f"UID列表已更新为: {self.config.uid_list}")
+        else:
+            print("UID列表未更改")
 
 # =======================
 # 主函数
 # =======================
 def main():
     config = Config()
-    file_manager = FileManager(config)
     downloader = Downloader(config)
-    saved_url_set = file_manager.load_url_set(config.saved_url_filename)
-    dynamic_processor = DynamicProcessor(config, file_manager, downloader, saved_url_set)
-    menu = OperationMenu(config, file_manager, dynamic_processor)
+    menu = OperationMenu(config, downloader)
     menu.run()
 
 if __name__ == "__main__":
