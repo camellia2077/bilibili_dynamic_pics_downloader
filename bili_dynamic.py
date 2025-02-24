@@ -6,8 +6,7 @@ import requests
 import datetime
 import random
 
-#批量uid批量下载
-#增加下载完成后重新输入新的uid 的选项
+#修改日志为log文件
 
 # 全局配置
 FILE_NAME_MAX_LENGTH = 25
@@ -110,8 +109,8 @@ class Config:
         self.uid = uid
         self.username = self.get_username(uid)
         self.download_dir = self.get_download_dir(self.base_dir, uid)
-        self.saved_url_filename = os.path.join(self.download_dir, "saved_url.txt")
-        self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.txt")
+        self.saved_url_filename = os.path.join(self.download_dir, "saved_url.log")
+        self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.log")
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
 
@@ -202,9 +201,9 @@ class DynamicProcessor:
         self.file_manager = file_manager
         self.downloader = downloader
         self.saved_url_set = saved_url_set
-        self.txt_folder = os.path.join(self.config.download_dir, "txt")
-        if not os.path.exists(self.txt_folder):
-            os.makedirs(self.txt_folder)
+        self.log_folder = os.path.join(self.config.download_dir, "log")
+        if not os.path.exists(self.log_folder):
+            os.makedirs(self.log_folder)
 
     def process_dynamic(self, dynamic, success_list, failed_list):
         dynamic_url = None
@@ -234,14 +233,14 @@ class DynamicProcessor:
             pics = card_dict.get("item", {}).get("pictures", [])
 
             if not pics:
-                txt_filename = f"{time_str}-{dynamic_id}.txt"
-                txt_path = os.path.join(self.txt_folder, txt_filename)
-                with open(txt_path, 'w', encoding='utf-8') as f:
+                log_filename = f"{time_str}-{dynamic_id}.log"
+                log_path = os.path.join(self.log_folder, log_filename)
+                with open(log_path, 'w', encoding='utf-8') as f:
                     f.write(f"URL: {dynamic_url}\n")
                     f.write(f"发布时间: {time_str}\n")
                     f.write("内容:\n")
                     f.write(dynamic_content)
-                print(f"保存无图片动态到: {txt_path}")
+                print(f"保存无图片动态到: {log_path}")
             else:
                 if has_content:
                     content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
@@ -262,7 +261,7 @@ class DynamicProcessor:
                 else:
                     print(f"文件夹已存在: {dynamic_folder}")
 
-                info_path = os.path.join(dynamic_folder, "info.txt")
+                info_path = os.path.join(dynamic_folder, "info.log")
                 with open(info_path, 'w', encoding='utf-8') as f:
                     f.write(f"URL: {dynamic_url}\n")
                     f.write(f"发布时间: {time_str}\n")
