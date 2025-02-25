@@ -100,21 +100,13 @@ class Config:
         return None
 
     def get_interval(self):
-        pattern = r'[!@#$%^&*().,:"{}[]、，。？！]'
         user_interval = input("请输入float类型下载间隔(秒，默认3):").strip()
         if user_interval == "":
             return 3
-        elif any(char.isalpha() for char in user_interval) == True:
-            print("请输入数字,而不是字母")
-            return self.get_interval()
-        elif bool(re.search(pattern,user_interval)) == True:
-            print("请输入数字,而不是特殊字符如!@#$/")
-            return self.get_interval()
         else:
             float_user_interval = float(user_interval)
             print ("您现在输入的的间隔是:",float_user_interval,"秒")
             return float_user_interval
-
 
     def update_for_uid(self, uid):
         self.uid = uid
