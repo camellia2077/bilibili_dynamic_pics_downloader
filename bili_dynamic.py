@@ -16,7 +16,7 @@ DELAY_LAST = 0.6
 # 配置类: 获取用户输入, 保存基本配置信息
 # =======================
 class Config:
-    def __init__(self, uid_list=None,):
+    def __init__(self, uid_list=None):
         self.COOKIE = self.get_cookie()
         self.uid_list = uid_list if uid_list else self.get_uid_list()
         self.uid = None  # 当前处理的 UID
@@ -26,6 +26,7 @@ class Config:
         self.username_cache = {}  # 用于缓存用户名
         self.saved_url_filename = None
         self.unsaved_url_filename = None
+        self.date_log_filename = None
         # Prompt for base directory
         base_dir_input = input("请输入保存文件的基目录（默认 C:\\Base1\\bili）:").strip()
         self.base_dir = base_dir_input if base_dir_input else "C:\\Base1\\bili"
@@ -41,7 +42,10 @@ class Config:
                 print("cookie小于10,长度太短,应该是错误的,请重新输入")
                 COOKIE = input("请输入B站Cookie(必填):").strip()
             return COOKIE
-
+    #坂坂白_560647 河野华_18343098 Kitaro绮太郎_2075682
+    #粽子淞_31968078 走路摇ZLY_356010767 #谢安然_21876627
+    #病院坂saki_4096581
+    #["560647", "18343098", "2075682", "31968078", "356010767", "21876627", "4096581"]
     def get_uid_list(self):
         uid_input = input("请输入用户UID（多个UID用逗号分隔，默认560647,18343098,2075682）:").strip()
         if uid_input:
@@ -105,7 +109,7 @@ class Config:
             return 3
         else:
             float_user_interval = float(user_interval)
-            print ("您现在输入的的间隔是:",float_user_interval,"秒")
+            print("您现在输入的的间隔是:", float_user_interval, "秒")
             return float_user_interval
 
     def update_for_uid(self, uid):
@@ -114,6 +118,7 @@ class Config:
         self.download_dir = self.get_download_dir(self.base_dir, uid)
         self.saved_url_filename = os.path.join(self.download_dir, "saved_url.txt")
         self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.txt")
+        self.date_log_filename = os.path.join(self.download_dir, "date.log")
         if not os.path.exists(self.download_dir):
             os.makedirs(self.download_dir)
 
@@ -125,6 +130,7 @@ class FileManager:
         self.config = config
         self.ensure_file_exists(self.config.saved_url_filename)
         self.ensure_file_exists(self.config.unsaved_url_filename)
+        self.ensure_file_exists(self.config.date_log_filename)
 
     def ensure_file_exists(self, filename):
         if not os.path.exists(filename):
@@ -141,6 +147,18 @@ class FileManager:
         with open(filename, 'w', encoding='utf-8') as f:
             for url in urls:
                 f.write(url + "\n")
+    #读取截止日期
+    def read_date_log(self):
+        if os.path.exists(self.config.date_log_filename):
+            with open(self.config.date_log_filename, 'r', encoding='utf-8') as f:
+                date_str = f.read().strip()
+                if date_str:
+                    return int(date_str)
+        return None
+    #写截止日期
+    def write_date_log(self, date_num):
+        with open(self.config.date_log_filename, 'w', encoding='utf-8') as f:
+            f.write(str(date_num))
 
 # =======================
 # 工具类: 提供公共工具方法
@@ -169,6 +187,11 @@ class Utils:
     def format_datetime(timestamp):
         dt = datetime.datetime.fromtimestamp(timestamp)
         return f"{dt.year}-{dt.month}-{dt.day}-{dt.hour:02d}-{dt.minute:02d}"
+    #将时间格式转换为YYYYMMDDHHMM格式的数字
+    @staticmethod
+    def timestamp_to_num(timestamp):
+        dt = datetime.datetime.fromtimestamp(timestamp)
+        return int(f"{dt.year:04d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}{dt.minute:02d}")
 
 # =======================
 # 下载类: 负责文件下载
@@ -199,14 +222,16 @@ class Downloader:
 # 动态处理类: 处理单条动态，实时保存 URL
 # =======================
 class DynamicProcessor:
-    def __init__(self, config: Config, file_manager: FileManager, downloader: Downloader, saved_url_set: set):
+    def __init__(self, config: Config, file_manager: FileManager, downloader: Downloader, saved_url_set: set, date_log_num: int):
         self.config = config
         self.file_manager = file_manager
         self.downloader = downloader
         self.saved_url_set = saved_url_set
+        self.date_log_num = date_log_num
         self.txt_folder = os.path.join(self.config.download_dir, "txt")
         if not os.path.exists(self.txt_folder):
             os.makedirs(self.txt_folder)
+        self.first_dynamic_time = None
 
     def process_dynamic(self, dynamic, success_list, failed_list):
         dynamic_url = None
@@ -223,7 +248,19 @@ class DynamicProcessor:
                 return
 
             timestamp = desc.get("timestamp")
-            time_str = Utils.format_datetime(timestamp) if timestamp else "未知时间"
+            if not timestamp:
+                print("无法获取 timestamp, 跳过该动态")
+                return
+            dynamic_time_num = Utils.timestamp_to_num(timestamp)
+            #截止时间和爬取时间对比
+            if self.date_log_num and dynamic_time_num < self.date_log_num:
+                print(f"动态 {dynamic_url} 的发布时间 {dynamic_time_num} 小于截止日期 {self.date_log_num}, 停止爬取")
+                raise StopIteration("已经到了截止日期")
+
+            if self.first_dynamic_time is None:
+                self.first_dynamic_time = dynamic_time_num
+
+            time_str = Utils.format_datetime(timestamp)
             card_str = dynamic.get("card", "")
             card_dict = Utils.parse_dynamic_card(card_str)
 
@@ -290,12 +327,20 @@ class DynamicProcessor:
             with open(self.config.saved_url_filename, 'a', encoding='utf-8') as f:
                 f.write(dynamic_url + "\n")
             success_list.append(dynamic_url)
+        except StopIteration as e:
+            raise e
         except Exception as e:
             print("处理动态出错:", e)
             if dynamic_url:
                 with open(self.config.unsaved_url_filename, 'a', encoding='utf-8') as f:
                     f.write(dynamic_url + "\n")
                 failed_list.append(dynamic_url)
+
+    def save_first_dynamic_time(self):
+        if self.first_dynamic_time is not None:
+            #截止日期date
+            self.file_manager.write_date_log(self.first_dynamic_time)
+            print(f"保存第一个动态的发布时间到 date.log: {self.first_dynamic_time}")
 
 # =======================
 # 主爬虫类: 分页获取动态数据
@@ -316,40 +361,43 @@ class BilibiliDynamicSpider:
         has_more = True
         page_count = 1
 
-        while has_more:
-            print(f"正在处理第 {page_count} 页动态...")
-            try:
-                response = requests.get(base_url, headers=self.dynamic_processor.downloader.headers, params=params, timeout=10)
-                if response.status_code != 200:
-                    print("请求失败, 状态码:", response.status_code)
-                    break
-                data = response.json()
-                if data.get("code") != 0:
-                    print("接口返回错误信息:", data.get("message", ""))
-                    break
-                data_data = data.get("data", {})
-                cards = data_data.get("cards", [])
-                has_more = data_data.get("has_more", False)
-                if "next_offset" in data_data:
-                    params["offset_dynamic_id"] = data_data["next_offset"]
-                elif cards:
-                    params["offset_dynamic_id"] = cards[-1].get("desc", {}).get("dynamic_id", 0)
-                else:
-                    has_more = False
+        try:
+            while has_more:
+                print(f"正在处理第 {page_count} 页动态...")
+                try:
+                    response = requests.get(base_url, headers=self.dynamic_processor.downloader.headers, params=params, timeout=10)
+                    if response.status_code != 200:
+                        print("请求失败, 状态码:", response.status_code)
+                        break
+                    data = response.json()
+                    if data.get("code") != 0:
+                        print("接口返回错误信息:", data.get("message", ""))
+                        break
+                    data_data = data.get("data", {})
+                    cards = data_data.get("cards", [])
+                    has_more = data_data.get("has_more", False)
+                    if "next_offset" in data_data:
+                        params["offset_dynamic_id"] = data_data["next_offset"]
+                    elif cards:
+                        params["offset_dynamic_id"] = cards[-1].get("desc", {}).get("dynamic_id", 0)
+                    else:
+                        has_more = False
 
-                if not cards:
-                    print("当前页没有动态数据, 结束下载。")
+                    if not cards:
+                        print("当前页没有动态数据, 结束下载。")
+                        break
+
+                    for dynamic in cards:
+                        self.dynamic_processor.process_dynamic(dynamic, self.success_list, self.failed_list)
+
+                    page_count += 1
+                    print(f"等待 {self.config.interval} 秒后继续下载下一页...")
+                    time.sleep(self.config.interval)
+                except StopIteration as e:
+                    print(e)
                     break
-
-                for dynamic in cards:
-                    self.dynamic_processor.process_dynamic(dynamic, self.success_list, self.failed_list)
-
-                page_count += 1
-                print(f"等待 {self.config.interval} 秒后继续下载下一页...")
-                time.sleep(self.config.interval)
-            except Exception as e:
-                print("处理页面时发生错误:", e)
-                break
+        finally:
+            self.dynamic_processor.save_first_dynamic_time()
 
 # =======================
 # 重试失败 URL 的类
@@ -466,8 +514,9 @@ class OperationMenu:
                     print(f"\n开始下载UID: {uid}")
                     self.config.update_for_uid(uid)
                     file_manager = FileManager(self.config)
+                    date_log_num = file_manager.read_date_log()
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
-                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set)
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num)
                     spider = BilibiliDynamicSpider(self.config, file_manager, dynamic_processor)
                     spider.run()
             elif choice == "2":
@@ -475,8 +524,9 @@ class OperationMenu:
                     print(f"\n重试UID: {uid} 的失败URL")
                     self.config.update_for_uid(uid)
                     file_manager = FileManager(self.config)
+                    date_log_num = file_manager.read_date_log()
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
-                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set)
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num)
                     retry = RetryFailedUrls(self.config, file_manager, dynamic_processor)
                     retry.run()
             elif choice == "3":
