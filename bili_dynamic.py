@@ -16,13 +16,13 @@ DELAY_LAST = 0.6
 # 配置类: 获取用户输入, 保存基本配置信息
 # =======================
 class Config:
-    def __init__(self, uid_list=None, interval=None):
+    def __init__(self, uid_list=None,):
         self.COOKIE = self.get_cookie()
         self.uid_list = uid_list if uid_list else self.get_uid_list()
         self.uid = None  # 当前处理的 UID
         self.download_dir = None
         self.username = None
-        self.interval = interval or self.get_interval()
+        self.interval = self.get_interval()
         self.username_cache = {}  # 用于缓存用户名
         self.saved_url_filename = None
         self.unsaved_url_filename = None
@@ -100,8 +100,21 @@ class Config:
         return None
 
     def get_interval(self):
-        interval = input("请输入下载间隔(秒，默认3):").strip()
-        return float(interval) if interval else 3
+        pattern = r'[!@#$%^&*().,:"{}[]、，。？！]'
+        user_interval = input("请输入float类型下载间隔(秒，默认3):").strip()
+        if user_interval == "":
+            return 3
+        elif any(char.isalpha() for char in user_interval) == True:
+            print("请输入数字,而不是字母")
+            return self.get_interval()
+        elif bool(re.search(pattern,user_interval)) == True:
+            print("请输入数字,而不是特殊字符如!@#$/")
+            return self.get_interval()
+        else:
+            float_user_interval = float(user_interval)
+            print ("您现在输入的的间隔是:",float_user_interval,"秒")
+            return float_user_interval
+
 
     def update_for_uid(self, uid):
         self.uid = uid
