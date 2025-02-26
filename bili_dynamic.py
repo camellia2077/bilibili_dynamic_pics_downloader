@@ -1,7 +1,5 @@
-'''新逻辑会先检查是否存在名称包含 UID 的文件夹，
-然后再进行 API 调用以获取用户名。若找到匹配的文件夹，
-则跳过 API 请求，直接使用该文件夹，并输出类似“检测到同名'{uid}'，
-跳过通过 api 获取用户名”的提示信息。'''
+'''方法 1：当达到 date.log 中的日期时，停止保存，且不检查 saved_url.txt 中的 URL。
+方法 2：检查 saved_url.txt 中的网址以跳过已保存的动态，但不使用 date.log 中的日期来停止爬取。'''
 import os
 import re
 import json
@@ -10,7 +8,6 @@ import requests
 import datetime
 import random
 
-# 全局配置
 FILE_NAME_MAX_LENGTH = 25
 COOKIE = "fucj"
 DELAY_FIRST = 0.5
@@ -37,20 +34,27 @@ class Config:
 
     def get_cookie(self):
         global COOKIE
+        #cookie检测长度
+        cookie_length = 100
         if len(COOKIE) > 10:
             return COOKIE
         else:
-            while len(COOKIE) < 10:
-                print("cookie小于10,长度太短,应该是错误的,请重新输入")
+            while len(COOKIE) < 100:
+                print(f"cookie小于{100},全局变量COOKIE的长度太短,应该是错误的,请重新输入")
                 COOKIE = input("请输入B站Cookie(必填):").strip()
             return COOKIE
-
+    #Midoriko绿子_8048877
     def get_uid_list(self):
-        uid_input = input("请输入用户UID(多个UID用逗号分隔,默认560647,18343098,2075682）:").strip()
+        default_uid = ["18343098", "2075682", "31968078", 
+                            "356010767", "21876627", "4096581", 
+                            "305956876", "8048877"]
+        result = ",".join(default_uid)
+        print (f"回车默认下载为:{result}")
+        uid_input = input(f"请输入用户UID,多个UID用逗号分隔:").strip()
         if uid_input:
             uid_list = [uid.strip() for uid in uid_input.split(',')]
         else:
-            uid_list = ["18343098", "2075682", "31968078", "356010767", "21876627", "4096581", "305956876"]
+            uid_list = default_uid
         return uid_list
 
     def get_username(self, uid):
@@ -59,11 +63,11 @@ class Config:
         
         url = f"https://api.bilibili.com/x/space/acc/info?mid={uid}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.93 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
             "Cookie": self.COOKIE
         }
         try:
-            time.sleep(2)  # 增加请求间隔
+            time.sleep(3)  # 增加请求间隔
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
@@ -80,15 +84,12 @@ class Config:
         return f"用户_{uid}"
 
     def get_download_dir(self, base_dir, uid):
-        # 检查基目录下是否有包含 UID 的文件夹
         for subdir in os.listdir(base_dir):
             subdir_path = os.path.join(base_dir, subdir)
             if os.path.isdir(subdir_path) and uid in subdir:
-                #检测匹配文件夹名称
                 print(f'检测到同名"{uid}",跳过通过api获取用户名')
                 return subdir_path
         
-        # 如果没有找到匹配的文件夹，则通过 API 获取用户名并创建新文件夹
         username = self.get_username(uid)
         new_folder_name = f"{username}_{uid}"
         new_folder_path = os.path.join(base_dir, new_folder_name)
@@ -186,9 +187,7 @@ class Utils:
         dt = datetime.datetime.fromtimestamp(timestamp)
         return int(f"{dt.year:04d}{dt.month:02d}{dt.day:02d}{dt.hour:02d}{dt.minute:02d}")
 
-# =======================
 # 下载类: 负责文件下载
-# =======================
 class Downloader:
     def __init__(self, config: Config):
         self.config = config
@@ -211,16 +210,16 @@ class Downloader:
         except Exception as e:
             print(f"下载 {url} 出错: {e}")
 
-# =======================
-# 动态处理类: 处理单条动态，实时保存 URL
-# =======================
+
+# 动态处理类
 class DynamicProcessor:
-    def __init__(self, config: Config, file_manager: FileManager, downloader: Downloader, saved_url_set: set, date_log_num: int):
+    def __init__(self, config: Config, file_manager: FileManager, downloader: Downloader, saved_url_set: set, date_log_num: int, method: str):
         self.config = config
         self.file_manager = file_manager
         self.downloader = downloader
         self.saved_url_set = saved_url_set
         self.date_log_num = date_log_num
+        self.method = method  # 'date' 或 'url'
         self.txt_folder = os.path.join(self.config.download_dir, "txt")
         if not os.path.exists(self.txt_folder):
             os.makedirs(self.txt_folder)
@@ -236,7 +235,9 @@ class DynamicProcessor:
                 return
             dynamic_id = str(dynamic_id)
             dynamic_url = f"https://t.bilibili.com/{dynamic_id}"
-            if dynamic_url in self.saved_url_set:
+            
+            # 对于 'url' 方法，检查 saved_url_set 并跳过已保存的动态
+            if self.method == 'url' and dynamic_url in self.saved_url_set:
                 print(f"动态 {dynamic_url} 已下载, 跳过。")
                 return
 
@@ -245,7 +246,9 @@ class DynamicProcessor:
                 print("无法获取 timestamp, 跳过该动态")
                 return
             dynamic_time_num = Utils.timestamp_to_num(timestamp)
-            if self.date_log_num and dynamic_time_num < self.date_log_num:
+            
+            # 对于 'date' 方法，检查日期并在达到截止日期时停止
+            if self.method == 'date' and self.date_log_num and dynamic_time_num < self.date_log_num:
                 print(f"动态 {dynamic_url} 的发布时间 {dynamic_time_num} 小于截止日期 {self.date_log_num}, 停止爬取")
                 raise StopIteration("已经到了截止日期")
 
@@ -331,11 +334,10 @@ class DynamicProcessor:
     def save_first_dynamic_time(self):
         if self.first_dynamic_time is not None:
             self.file_manager.write_date_log(self.first_dynamic_time)
-            print(f"保存第一个动态的发布时间到 date.log: {self.first_dynamic_time}")
+            print(f"获取到的第一个动态的发布时间，保存到截止日期 date.log: {self.first_dynamic_time}")
 
-# =======================
+
 # 主爬虫类: 分页获取动态数据
-# =======================
 class BilibiliDynamicSpider:
     def __init__(self, config: Config, file_manager: FileManager, dynamic_processor: DynamicProcessor):
         self.config = config
@@ -390,9 +392,8 @@ class BilibiliDynamicSpider:
         finally:
             self.dynamic_processor.save_first_dynamic_time()
 
-# =======================
+
 # 重试失败 URL 的类
-# =======================
 class RetryFailedUrls:
     def __init__(self, config: Config, file_manager: FileManager, dynamic_processor: DynamicProcessor):
         self.config = config
@@ -483,9 +484,6 @@ class RetryFailedUrls:
         if retry_queue:
             print(f"以下URL仍然失败:\n" + "\n".join(retry_queue))
 
-# =======================
-# 操作菜单
-# =======================
 class OperationMenu:
     def __init__(self, config, downloader):
         self.config = config
@@ -501,16 +499,30 @@ class OperationMenu:
                 "4. 修改UID\n请输入数字: "
             ).strip()
             if choice == "1":
+                method_choice = input(
+                    "请选择保存方法:\n"
+                    "1. 使用 date.log 截止日期停止，不检查 saved_url.txt\n"
+                    "2. 检查 saved_url.txt，不使用 date.log 截止日期\n"
+                    "请输入数字: "
+                ).strip()
+                if method_choice == "1":
+                    method = 'date'
+                elif method_choice == "2":
+                    method = 'url'
+                else:
+                    print("无效选择，默认使用方法1")
+                    method = 'date'
+                
                 for uid in self.config.uid_list:
                     print(f"\n开始下载UID: {uid}")
                     self.config.update_for_uid(uid)
                     file_manager = FileManager(self.config)
                     date_log_num = file_manager.read_date_log()
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
-                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num)
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num, method)
                     spider = BilibiliDynamicSpider(self.config, file_manager, dynamic_processor)
                     spider.run()
-                    long_interval = 10
+                    long_interval = 4.44
                     print("\n")
                     print("开始尖端科技之time.sleep", long_interval, "秒")
                     print("\n")
@@ -522,7 +534,8 @@ class OperationMenu:
                     file_manager = FileManager(self.config)
                     date_log_num = file_manager.read_date_log()
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
-                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num)
+                    # 对于重试，使用 'url' 方法
+                    dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num, method='url')
                     retry = RetryFailedUrls(self.config, file_manager, dynamic_processor)
                     retry.run()
             elif choice == "3":
@@ -540,10 +553,6 @@ class OperationMenu:
             print(f"UID列表已更新为: {self.config.uid_list}")
         else:
             print("UID列表未更改")
-
-# =======================
-# 主函数
-# =======================
 def main():
     config = Config()
     downloader = Downloader(config)
