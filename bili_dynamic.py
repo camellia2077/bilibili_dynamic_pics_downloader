@@ -1,3 +1,7 @@
+'''新逻辑会先检查是否存在名称包含 UID 的文件夹，
+然后再进行 API 调用以获取用户名。若找到匹配的文件夹，
+则跳过 API 请求，直接使用该文件夹，并输出类似“检测到同名'{uid}'，
+跳过通过 api 获取用户名”的提示信息。'''
 import os
 import re
 import json
@@ -11,10 +15,8 @@ FILE_NAME_MAX_LENGTH = 25
 COOKIE = "fucj"
 DELAY_FIRST = 0.5
 DELAY_LAST = 0.6
+LONG_LONG_INTERVAL = 1200
 
-# =======================
-# 配置类: 获取用户输入, 保存基本配置信息
-# =======================
 class Config:
     def __init__(self, uid_list=None):
         self.COOKIE = self.get_cookie()
@@ -42,16 +44,13 @@ class Config:
                 print("cookie小于10,长度太短,应该是错误的,请重新输入")
                 COOKIE = input("请输入B站Cookie(必填):").strip()
             return COOKIE
-    #坂坂白_560647 河野华_18343098 Kitaro绮太郎_2075682
-    #粽子淞_31968078 走路摇ZLY_356010767 #谢安然_21876627
-    #病院坂saki_4096581
-    #["560647", "18343098", "2075682", "31968078", "356010767", "21876627", "4096581"]
+
     def get_uid_list(self):
-        uid_input = input("请输入用户UID（多个UID用逗号分隔，默认560647,18343098,2075682）:").strip()
+        uid_input = input("请输入用户UID(多个UID用逗号分隔,默认560647,18343098,2075682）:").strip()
         if uid_input:
             uid_list = [uid.strip() for uid in uid_input.split(',')]
         else:
-            uid_list = ["560647", "18343098", "2075682"]
+            uid_list = ["18343098", "2075682", "31968078", "356010767", "21876627", "4096581", "305956876"]
         return uid_list
 
     def get_username(self, uid):
@@ -81,27 +80,21 @@ class Config:
         return f"用户_{uid}"
 
     def get_download_dir(self, base_dir, uid):
+        # 检查基目录下是否有包含 UID 的文件夹
         for subdir in os.listdir(base_dir):
             subdir_path = os.path.join(base_dir, subdir)
-            if os.path.isdir(subdir_path):
-                extracted_uid = self.extract_uid_from_folder_name(subdir)
-                if extracted_uid == uid:
-                    print(f"找到匹配的文件夹: {subdir_path}")
-                    return subdir_path
+            if os.path.isdir(subdir_path) and uid in subdir:
+                #检测匹配文件夹名称
+                print(f'检测到同名"{uid}",跳过通过api获取用户名')
+                return subdir_path
         
+        # 如果没有找到匹配的文件夹，则通过 API 获取用户名并创建新文件夹
         username = self.get_username(uid)
         new_folder_name = f"{username}_{uid}"
         new_folder_path = os.path.join(base_dir, new_folder_name)
         os.makedirs(new_folder_path, exist_ok=True)
         print(f"创建新文件夹: {new_folder_path}")
         return new_folder_path
-
-    @staticmethod
-    def extract_uid_from_folder_name(folder_name):
-        match = re.search(r'\d+', folder_name)
-        if match:
-            return match.group()
-        return None
 
     def get_interval(self):
         user_interval = input("请输入float类型下载间隔(秒，默认3):").strip()
@@ -114,8 +107,8 @@ class Config:
 
     def update_for_uid(self, uid):
         self.uid = uid
-        self.username = self.get_username(uid)
         self.download_dir = self.get_download_dir(self.base_dir, uid)
+        self.username = self.get_username(uid)
         self.saved_url_filename = os.path.join(self.download_dir, "saved_url.txt")
         self.unsaved_url_filename = os.path.join(self.download_dir, "unsaved_url.txt")
         self.date_log_filename = os.path.join(self.download_dir, "date.log")
@@ -147,7 +140,7 @@ class FileManager:
         with open(filename, 'w', encoding='utf-8') as f:
             for url in urls:
                 f.write(url + "\n")
-    #读取截止日期
+
     def read_date_log(self):
         if os.path.exists(self.config.date_log_filename):
             with open(self.config.date_log_filename, 'r', encoding='utf-8') as f:
@@ -155,7 +148,7 @@ class FileManager:
                 if date_str:
                     return int(date_str)
         return None
-    #写截止日期
+
     def write_date_log(self, date_num):
         with open(self.config.date_log_filename, 'w', encoding='utf-8') as f:
             f.write(str(date_num))
@@ -187,7 +180,7 @@ class Utils:
     def format_datetime(timestamp):
         dt = datetime.datetime.fromtimestamp(timestamp)
         return f"{dt.year}-{dt.month}-{dt.day}-{dt.hour:02d}-{dt.minute:02d}"
-    #将时间格式转换为YYYYMMDDHHMM格式的数字
+
     @staticmethod
     def timestamp_to_num(timestamp):
         dt = datetime.datetime.fromtimestamp(timestamp)
@@ -252,7 +245,6 @@ class DynamicProcessor:
                 print("无法获取 timestamp, 跳过该动态")
                 return
             dynamic_time_num = Utils.timestamp_to_num(timestamp)
-            #截止时间和爬取时间对比
             if self.date_log_num and dynamic_time_num < self.date_log_num:
                 print(f"动态 {dynamic_url} 的发布时间 {dynamic_time_num} 小于截止日期 {self.date_log_num}, 停止爬取")
                 raise StopIteration("已经到了截止日期")
@@ -338,7 +330,6 @@ class DynamicProcessor:
 
     def save_first_dynamic_time(self):
         if self.first_dynamic_time is not None:
-            #截止日期date
             self.file_manager.write_date_log(self.first_dynamic_time)
             print(f"保存第一个动态的发布时间到 date.log: {self.first_dynamic_time}")
 
@@ -519,6 +510,11 @@ class OperationMenu:
                     dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num)
                     spider = BilibiliDynamicSpider(self.config, file_manager, dynamic_processor)
                     spider.run()
+                    long_interval = 10
+                    print("\n")
+                    print("开始尖端科技之time.sleep", long_interval, "秒")
+                    print("\n")
+                    time.sleep(long_interval)
             elif choice == "2":
                 for uid in self.config.uid_list:
                     print(f"\n重试UID: {uid} 的失败URL")
