@@ -6,54 +6,80 @@ import requests
 import datetime
 import random
 
-FILE_NAME_MAX_LENGTH = 40
-COOKIE = "fucj"
-DELAY_FIRST = 0.5
-DELAY_LAST = 0.6
-LONG_LONG_INTERVAL = 1200
+def load_config():
+    """加载配置文件 config.json。如果不存在或缺少键，则报错退出。"""
+    config_path = 'config.json'
+    if not os.path.exists(config_path):
+        print(f"错误: 配置文件 {config_path} 不存在。")
+        print("请创建一个 config.json 文件并填入所有必需的配置信息。")
+        exit()
+    
+    try:
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+        
+        # 检查所有必需的键是否存在
+        required_keys = ["COOKIE", "default_uid", "interval", "base_dir"]
+        missing_keys = [key for key in required_keys if key not in config_data]
+        if missing_keys:
+            print(f"错误: 您的 config.json 文件中缺少以下必要的键: {', '.join(missing_keys)}")
+            exit()
+            
+        return config_data
+    except json.JSONDecodeError:
+        print(f"错误: {config_path} 文件格式不正确，无法解析JSON。")
+        exit()
+    except Exception as e:
+        print(f"加载配置文件时发生未知错误: {e}")
+        exit()
 
 class Config:
-    def __init__(self, uid_list=None):
+    def __init__(self, settings):
+        self.settings = settings
         self.COOKIE = self.get_cookie()
-        self.uid_list = uid_list if uid_list else self.get_uid_list()
+        
+        # 直接从 settings (config.json) 加载配置，不再使用 input
+        self.base_dir = self.settings["base_dir"]
+        self.interval = self.settings["interval"]
+        self.uid_list = self.get_uid_list()
+        
+        print("配置加载成功:")
+        print(f" - UID列表: {self.uid_list}")
+        print(f" - 下载间隔: {self.interval} 秒")
+        print(f" - 保存基目录: {self.base_dir}")
+
         self.uid = None
         self.download_dir = None
         self.username = None
-        self.interval = self.get_interval()
         self.username_cache = {}
         self.saved_url_filename = None
         self.unsaved_url_filename = None
         self.date_log_filename = None
-        base_dir_input = input("请输入保存文件的基目录（默认 C:\\Base1\\bili）:").strip()
-        self.base_dir = base_dir_input if base_dir_input else "C:\\Base1\\bili"
+
         if not os.path.exists(self.base_dir):
             os.makedirs(self.base_dir)
 
     def get_cookie(self):
-        global COOKIE
+        """从配置中获取COOKIE，如果长度不足则提示用户在终端输入。"""
+        cookie = self.settings.get("COOKIE", "")
         cookie_length = 100
-        if len(COOKIE) > cookie_length:
-            return COOKIE
+        if len(cookie) > cookie_length:
+            return cookie
         else:
-            while len(COOKIE) < 100:
-                print(f"cookie小于{100},全局变量COOKIE的长度太短,应该是错误的,请重新输入")
-                COOKIE = input("请输入B站Cookie(必填):").strip()
-            return COOKIE
+            while len(cookie) < cookie_length:
+                print("config.json中的COOKIE长度太短,可能是错误的,请在下方终端重新输入。")
+                cookie = input("请输入B站Cookie(必填): ").strip()
+            return cookie
 
     def get_uid_list(self):
+        """从配置中解析UID列表。"""
+        default_uid_list = self.settings.get("default_uid", [])
+        parsed_uids = [item.split('_')[-1] for item in default_uid_list if item.split('_')[-1].isdigit()]
         
-        default_uid = ["2075682", "8048877", "560647", 
-                       "4096581", "18343098", "21876627", 
-                       "305956876", "498099165", "31968078",
-                       "356010767"]
-        result = ",".join(default_uid)
-        print(f"回车默认下载为:{result}")
-        uid_input = input(f"请输入用户UID,多个UID用逗号分隔:").strip()
-        if uid_input:
-            uid_list = [uid.strip() for uid in uid_input.split(',')]
-        else:
-            uid_list = default_uid
-        return uid_list
+        if not parsed_uids:
+            print("警告: 在 config.json 中没有找到有效的UID。'default_uid' 列表为空或格式不正确 (应为 '用户名_UID' 格式)。")
+        
+        return parsed_uids
 
     def get_username(self, uid):
         if uid in self.username_cache:
@@ -92,15 +118,6 @@ class Config:
         os.makedirs(new_folder_path, exist_ok=True)
         print(f"创建新文件夹: {new_folder_path}")
         return new_folder_path
-
-    def get_interval(self):
-        user_interval = input("请输入float类型下载间隔(秒，默认3):").strip()
-        if user_interval == "":
-            return 3
-        else:
-            float_user_interval = float(user_interval)
-            print("您现在输入的的间隔是:", float_user_interval, "秒")
-            return float_user_interval
 
     def update_for_uid(self, uid):
         self.uid = uid
@@ -199,7 +216,10 @@ class Downloader:
 
     def download_file(self, url, filepath):
         try:
-            time.sleep(random.uniform(DELAY_FIRST, DELAY_LAST))
+            delay_first = self.config.settings.get("DELAY_FIRST", 0.1)
+            delay_last = self.config.settings.get("DELAY_LAST", 0.2)
+            time.sleep(random.uniform(delay_first, delay_last))
+            
             r = requests.get(url, headers=self.headers, stream=True, timeout=10)
             if r.status_code == 200:
                 with open(filepath, 'wb') as f:
@@ -251,6 +271,8 @@ class DynamicProcessor:
             time_str = Utils.format_datetime(timestamp)
             card_str = dynamic.get("card", "")
             card_dict = Utils.parse_dynamic_card(card_str)
+            
+            file_name_max_length = self.config.settings.get("FILE_NAME_MAX_LENGTH", 40)
 
             dynamic_content = ""
             if "item" in card_dict:
@@ -262,7 +284,7 @@ class DynamicProcessor:
 
             if not pics:
                 if has_content:
-                    content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
+                    content_clean = Utils.sanitize_filename(dynamic_content, file_name_max_length)
                     txt_filename = f"{time_str}-{content_clean}.txt"
                 else:
                     txt_filename = f"{time_str}-{dynamic_id}.txt"
@@ -275,9 +297,9 @@ class DynamicProcessor:
                 print(f"保存无图片动态到: {txt_path}")
             else:
                 if has_content:
-                    content_clean = Utils.sanitize_filename(dynamic_content, FILE_NAME_MAX_LENGTH)
+                    content_clean = Utils.sanitize_filename(dynamic_content, file_name_max_length)
                     folder_name = f"{time_str}-{content_clean}".replace(" ", "-")
-                    folder_name = Utils.sanitize_filename(folder_name, FILE_NAME_MAX_LENGTH)
+                    folder_name = Utils.sanitize_filename(folder_name, file_name_max_length)
                     dynamic_folder = os.path.join(self.config.download_dir, folder_name)
                 else:
                     null_folder = os.path.join(self.config.download_dir, "null")
@@ -315,7 +337,7 @@ class DynamicProcessor:
             with open(self.config.saved_url_filename, 'a', encoding='utf-8') as f:
                 f.write(dynamic_url + "\n")
             success_list.append(dynamic_url)
-            # 追加日期到 date.log
+
             with open(self.config.date_log_filename, 'a', encoding='utf-8') as f:
                 f.write(str(dynamic_time_num) + "\n")
         except StopIteration as e:
@@ -395,52 +417,6 @@ class RetryFailedUrls:
             "Referer": "https://t.bilibili.com/"
         }
 
-    def _get_dynamic_detail(self, dynamic_id):
-        api_url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/get_dynamic_detail"
-        params = {"dynamic_id": dynamic_id}
-        try:
-            response = requests.get(api_url, headers=self.headers, params=params, timeout=10)
-            if response.status_code != 200:
-                print(f"请求失败 状态码: {response.status_code}")
-                return None
-            data = response.json()
-            if data.get("code") != 0:
-                print(f"接口返回错误: {data.get('message')}")
-                return None
-            return data.get("data", {}).get("card")
-        except Exception as e:
-            print(f"获取动态详情失败: {e}")
-            return None
-
-    def _process_single_url(self, url):
-        print(f"\n{'='*30}\n正在处理URL: {url}")
-        if not url.startswith("https://t.bilibili.com/"):
-            print("非标准动态URL，跳过")
-            return False
-        dynamic_id = url.split("/")[-1]
-        if not dynamic_id.isdigit():
-            print("无效的 dynamic_id，跳过")
-            return False
-
-        dynamic_data = self._get_dynamic_detail(dynamic_id)
-        if not dynamic_data:
-            print("获取动态数据失败")
-            return False
-
-        try:
-            processed_data = {
-                "desc": {
-                    "dynamic_id": int(dynamic_id),
-                    "timestamp": dynamic_data["desc"]["timestamp"]
-                },
-                "card": dynamic_data["card"]
-            }
-            self.dynamic_processor.process_dynamic(processed_data, self.success_list, self.failed_list)
-            return True
-        except Exception as e:
-            print(f"处理动态时发生错误: {e}")
-            return False
-
     def run(self):
         print("\n开始重试未成功下载的URL...")
         unsaved_urls = self.file_manager.load_url_set(self.config.unsaved_url_filename)
@@ -448,33 +424,53 @@ class RetryFailedUrls:
             print("没有需要重试的URL")
             return
         print(f"发现 {len(unsaved_urls)} 条待重试URL")
-        retry_queue = list(unsaved_urls)
-        total_count = len(retry_queue)
+        
+        still_failed = set()
         success_count = 0
-        retry_limit = 2
+        
+        for url in unsaved_urls:
+            time.sleep(random.uniform(1.0, 2.0))
+            dynamic_id = url.split("/")[-1].split("?")[0]
+            if not dynamic_id.isdigit():
+                still_failed.add(url)
+                continue
 
-        for attempt in range(retry_limit):
-            print(f"\n第 {attempt+1} 次重试 (剩余 {len(retry_queue)} 条)")
-            temp_failed = []
-            for url in retry_queue:
-                time.sleep(random.uniform(1.0, 2.0))
-                if self._process_single_url(url):
+            api_url = f"https://api.bilibili.com/x/polymer/web-dynamic/v1/detail?id={dynamic_id}"
+            try:
+                res = requests.get(api_url, headers=self.headers, timeout=10)
+                detail_data = res.json()
+                if detail_data.get('code') == 0:
+                    item = detail_data.get('data', {}).get('item', {})
+                    if not item:
+                         still_failed.add(url)
+                         continue
+                    
+                    # 模拟 space_history 的格式
+                    dynamic_card = {
+                        "desc": item.get('desc'), 
+                        "card": item.get('card') # card在这里是dict, process_dynamic需要str
+                    }
+                    # 修正：DynamicProcessor 需要 card 是一个字符串
+                    dynamic_card['card'] = json.dumps(dynamic_card['card'], ensure_ascii=False)
+                    
+                    self.dynamic_processor.process_dynamic(dynamic_card, self.success_list, self.failed_list)
                     success_count += 1
-                    unsaved_urls.discard(url)
                 else:
-                    temp_failed.append(url)
-            retry_queue = temp_failed
-            if not retry_queue:
-                break
-
-        self.file_manager.write_url_file(self.config.unsaved_url_filename, list(unsaved_urls))
+                    print(f"重试URL {url} 失败: {detail_data.get('message')}")
+                    still_failed.add(url)
+            except Exception as e:
+                print(f"重试URL {url} 发生异常: {e}")
+                still_failed.add(url)
+        
+        self.file_manager.write_url_file(self.config.unsaved_url_filename, list(still_failed))
         print(f"\n{'='*30}")
-        print(f"重试完成! 成功 {success_count}/{total_count} 条")
-        if retry_queue:
-            print(f"以下URL仍然失败:\n" + "\n".join(retry_queue))
+        print(f"重试完成! 成功 {success_count}/{len(unsaved_urls)} 条")
+        if still_failed:
+            print(f"以下 {len(still_failed)} 个URL仍然失败:\n" + "\n".join(still_failed))
+
 
 class OperationMenu:
-    def __init__(self, config, downloader):
+    def __init__(self, config: Config, downloader: Downloader):
         self.config = config
         self.downloader = downloader
 
@@ -485,46 +481,36 @@ class OperationMenu:
                 "1. 开始新抓取\n"
                 "2. 重试失败URL\n"
                 "3. 退出\n"
-                "4. 修改UID\n请输入数字: "
+                "4. (从config.json)重新加载UID列表\n请输入数字: "
             ).strip()
             if choice == "1":
                 method_choice = input(
                     "请选择保存方法:\n"
-                    "1. 使用 date.log 截止日期停止，不检查 saved_url.txt\n"
-                    "2. 检查 saved_url.txt，不使用 date.log 截止日期\n"
+                    "1. 使用 date.log 截止日期停止 (推荐)\n"
+                    "2. 检查 saved_url.txt，直到获取到已保存的URL\n"
                     "请输入数字: "
                 ).strip()
-                if method_choice == "1":
-                    method = 'date'
-                elif method_choice == "2":
-                    method = 'url'
-                else:
-                    print("无效选择，默认使用方法1")
-                    method = 'date'
+                method = 'date' if method_choice == "1" else 'url'
                 
                 for uid in self.config.uid_list:
-                    print(f"\n开始下载UID: {uid}")
+                    print(f"\n{'='*20}\n开始下载UID: {uid} ({self.config.get_username(uid)})\n{'='*20}")
                     self.config.update_for_uid(uid)
                     file_manager = FileManager(self.config)
-                    if method == 'date':
-                        date_log_num = file_manager.read_date_log()
-                    else:
-                        date_log_num = file_manager.read_date_log()  # 方法2 只读第一行
+                    date_log_num = file_manager.read_date_log()
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
                     dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num, method)
                     spider = BilibiliDynamicSpider(self.config, file_manager, dynamic_processor)
                     spider.run()
-                    long_interval = 4.44
-                    print("\n")
-                    print("开始尖端科技之time.sleep", long_interval, "秒")
-                    print("\n")
+                    long_interval = self.config.settings.get("LONG_LONG_INTERVAL", 1200) / len(self.config.uid_list)
+                    long_interval = min(max(long_interval, 3.0), 30.0)
+                    print(f"\n用户 {uid} 下载完成，暂停 {long_interval:.2f} 秒\n")
                     time.sleep(long_interval)
             elif choice == "2":
                 for uid in self.config.uid_list:
-                    print(f"\n重试UID: {uid} 的失败URL")
+                    print(f"\n{'='*20}\n重试UID: {uid} 的失败URL\n{'='*20}")
                     self.config.update_for_uid(uid)
                     file_manager = FileManager(self.config)
-                    date_log_num = file_manager.read_date_log()
+                    date_log_num = None 
                     saved_url_set = file_manager.load_url_set(self.config.saved_url_filename)
                     dynamic_processor = DynamicProcessor(self.config, file_manager, self.downloader, saved_url_set, date_log_num, method='url')
                     retry = RetryFailedUrls(self.config, file_manager, dynamic_processor)
@@ -533,20 +519,15 @@ class OperationMenu:
                 print("程序退出")
                 break
             elif choice == "4":
-                self.change_uid()
+                print("从 config.json 重新加载UID列表...")
+                self.config.uid_list = self.config.get_uid_list()
+                print(f"UID列表已更新为: {self.config.uid_list}")
             else:
                 print("无效输入，请重新选择")
 
-    def change_uid(self):
-        new_uid_input = input("请输入新的UID（多个UID用逗号分隔）: ").strip()
-        if new_uid_input:
-            self.config.uid_list = [uid.strip() for uid in new_uid_input.split(',')]
-            print(f"UID列表已更新为: {self.config.uid_list}")
-        else:
-            print("UID列表未更改")
-
 def main():
-    config = Config()
+    app_settings = load_config()
+    config = Config(app_settings)
     downloader = Downloader(config)
     menu = OperationMenu(config, downloader)
     menu.run()
